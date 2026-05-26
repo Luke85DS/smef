@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Display</title>
+  <link rel="stylesheet" href="assets/css/style.css">
+  <style>
+    body.display-screen{margin:0;background:#020617;color:#f8fafc;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+    .projector{height:100vh;box-sizing:border-box;padding:14px;display:grid;grid-template-rows:auto minmax(0,1fr);gap:14px;background:radial-gradient(circle at top,#172554 0,#020617 62%)}
+    .projector-clock{position:relative;text-align:center;border:1px solid rgba(148,163,184,.35);border-radius:22px;background:rgba(15,23,42,.96);padding:10px 18px;box-shadow:0 12px 34px rgba(0,0,0,.32)}
+    .projector-clock .btn{position:absolute;top:16px;right:18px}
+    .projector-clock-label{font-size:18px;font-weight:900;color:#94a3b8;letter-spacing:.06em;text-transform:uppercase}
+    .projector-clock-number{font-size:88px;line-height:.9;font-weight:1000;letter-spacing:-5px;font-variant-numeric:tabular-nums}
+    .projector-clock-number.game{color:#22c55e!important}.projector-clock-number.break{color:#ef4444!important}.projector-clock-number.idle{color:#e2e8f0!important}
+    .projector-grid{min-height:0;display:grid!important;grid-template-columns:minmax(560px,1.08fr) minmax(430px,.84fr) minmax(300px,.54fr)!important;gap:14px!important;align-items:stretch!important}
+    .projector-panel{min-width:0;min-height:0;height:100%;box-sizing:border-box;background:rgba(15,23,42,.94);border:1px solid rgba(148,163,184,.30);border-radius:20px;padding:14px;box-shadow:0 12px 34px rgba(0,0,0,.28);overflow:hidden}
+    .projector-panel h2{margin:0 0 12px;font-size:24px;line-height:1.1}
+    .live-box-grid{height:calc(100% - 38px);display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-rows:repeat(4,minmax(0,1fr))!important;gap:12px!important}
+    .live-match-box{min-width:0;min-height:0;border:1px solid rgba(148,163,184,.34);border-radius:18px;background:rgba(30,41,59,.98);padding:12px;display:grid;grid-template-rows:auto 1fr auto;align-items:center;text-align:center;box-shadow:0 10px 24px rgba(0,0,0,.22)}
+    .live-match-box.flash{animation:scoreFlash .75s ease}
+    .live-meta{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:10px;color:#cbd5e1;font-weight:900;line-height:1}.sport-big{font-size:42px;line-height:1}.field-under{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:999px;background:#e2e8f0;color:#020617;font-size:18px;font-weight:1000}
+    .live-teams{align-self:center;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:stretch;justify-content:center;gap:8px;min-width:0;margin-top:8px;width:100%;height:66px}.live-team{font-size:20px;font-weight:1000;line-height:1.05;align-self:stretch}.live-team-name{display:flex;align-items:center;justify-content:center;min-width:0;height:100%;padding:5px 7px;border-radius:13px;background:rgba(15,23,42,.72);border:1px solid rgba(148,163,184,.22);overflow:hidden;text-align:center;white-space:normal;word-break:normal}.live-vs{display:none}
+    .live-score-pair{align-self:end;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;width:100%;margin-top:8px;margin-bottom:4px}.live-score-one{box-sizing:border-box;border-radius:16px;background:rgba(2,6,23,.70);border:1px solid rgba(148,163,184,.25);font-size:82px;font-weight:1000;line-height:1;font-variant-numeric:tabular-nums;color:#f8fafc;white-space:nowrap;text-align:center;letter-spacing:-.04em;padding:6px 10px 10px}
+    .field-pill{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;border-radius:999px;background:#e2e8f0;color:#020617;font-weight:1000}
+    .standings-wrap{height:calc(100% - 40px);overflow:hidden}.display-rank{width:100%;border-collapse:collapse;table-layout:fixed;font-size:19px}.display-rank th,.display-rank td{padding:8px 7px;border-bottom:1px solid rgba(148,163,184,.18);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.display-rank th{text-align:left;color:#94a3b8}.display-rank .pos{width:56px;text-align:center;font-weight:1000}.display-rank .team-cell{width:190px}.display-rank .num{text-align:right;width:54px;padding-right:14px}.display-rank tr.q{background:rgba(34,197,94,.12)}.display-rank tr.e{background:rgba(239,68,68,.12)}.stand-team{display:flex;align-items:center;gap:5px;min-width:0}.stand-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.playing-mini{display:inline-block;border-radius:999px;background:#facc15;color:#422006;font-weight:950;font-size:11px;padding:2px 6px;flex:0 0 auto}
+    .turns-stack{display:grid;grid-template-rows:1fr 1fr;gap:14px;height:100%;min-height:0}.turn-mini{min-height:0;overflow:hidden}.turn-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:19px}.turn-table td{padding:10px 5px;border-bottom:1px solid rgba(148,163,184,.16);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.turn-table td:nth-child(1){width:48px;text-align:center;font-size:34px;line-height:1}.turn-table td:nth-child(2){width:46px;text-align:center}.turn-table td.result-cell{width:70px;text-align:right;font-weight:1000;padding-right:10px}.turn-table .teams-cell{min-width:0}.muted-empty{color:#94a3b8;margin:0}
+    @keyframes scoreFlash{0%{transform:scale(1);border-color:rgba(148,163,184,.34)}35%{transform:scale(1.035);border-color:#facc15;background:rgba(113,63,18,.92)}100%{transform:scale(1);border-color:rgba(148,163,184,.34)}}
+    .countdown-overlay{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(2,6,23,.96);font-weight:1000;text-align:center}.countdown-overlay div{font-size:22vw;line-height:.8}.countdown-overlay .seconds{font-variant-numeric:tabular-nums}.countdown-overlay .word{font-size:17vw;letter-spacing:.18em;text-indent:.18em}.countdown-overlay .stop{color:#ef4444}.countdown-overlay .go{color:#22c55e}.countdown-overlay.game .seconds{color:#22c55e}.countdown-overlay.break .seconds{color:#ef4444}.countdown-overlay p{font-size:38px;margin:20px 0 0;color:#e2e8f0}:fullscreen #fullscreenBtn{display:none!important}
+    @media(max-width:1050px){body.display-screen{overflow:auto}.projector{height:auto;min-height:100vh}.projector-grid{grid-template-columns:1fr!important}.live-box-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;grid-template-rows:auto!important}.live-match-box{min-height:135px}.turns-stack{grid-template-columns:1fr 1fr;grid-template-rows:auto}.projector-clock-number{font-size:68px}}
+  </style>
+</head>
+<body class="display-screen">
+<script type="module">
+import {requireAdmin, listen, fmtTime, timerRemaining, asArray, teamName, tournamentPhase, phaseLabel, slotStartLabel, computeStandings, sportIcon, fieldNumber, matchScore, isPlayoffMode, playoffRoundLabel} from './assets/js/app.js';
+if(!requireAdmin()) throw new Error('Area admin bloccata');
+document.body.innerHTML = '<main id="app" class="projector"></main>';
+let state = {}, tick = null, lastScores = {};
+const esc = v => String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+const currentSlot = () => Number(state?.tournament?.currentSlot || 1);
+function isPO(){ return isPlayoffMode(state?.tournament); }
+function currentRound(){ return state?.tournament?.playoffRound; }
+function currentTitle(){ return isPO() ? playoffRoundLabel(currentRound()) : `Turno ${currentSlot()}`; }
+function matchesFor(slot){
+  if(isPO()){
+    const round = slot || currentRound();
+    return asArray(state?.playoffs?.matches).filter(m => m.round === round).sort((a,b)=>String(a.field||'').localeCompare(String(b.field||''),'it',{numeric:true}) || Number(a.index)-Number(b.index));
+  }
+  return asArray(state.matches).filter(m => Number(m.slot) === Number(slot)).sort((a,b)=>String(a.field).localeCompare(String(b.field),'it',{numeric:true}));
+}
+function currentMatches(){ const ms = matchesFor(isPO()?currentRound():currentSlot()).slice(0,8); while(ms.length < 8) ms.push(null); return ms; }
+function phaseClass(phase){ return phase === 'break' ? 'break' : (phase === 'game' ? 'game' : 'idle'); }
+function playingIds(){ const ids = new Set(); for(const m of matchesFor(isPO()?currentRound():currentSlot())){ if(m.status === 'in_progress'){ if(m.teamA) ids.add(m.teamA); if(m.teamB) ids.add(m.teamB); } } return ids; }
+function liveBox(m, idx){
+  if(!m) return `<article class="live-match-box"><div class="live-meta"><span class="sport-big">-</span><span class="field-under">-</span></div><div class="live-teams"><span class="live-team muted">-</span><span class="live-team muted">-</span></div><div class="live-score-pair"><span class="live-score-one">-</span><span class="live-score-one">-</span></div></article>`;
+  const id = m.id || `${m.slot}-${m.field}-${idx}`;
+  const score = matchScore(m);
+  const changed = lastScores[id] && lastScores[id] !== score;
+  lastScores[id] = score;
+  return `<article class="live-match-box ${changed ? 'flash' : ''}">
+    <div class="live-meta"><span class="sport-big">${sportIcon(m.sport)}</span><span class="field-under">${fieldNumber(m.field)}</span></div>
+    <div class="live-teams"><span class="live-team live-team-name">${esc(teamName(state.teams,m.teamA))}</span><span class="live-team live-team-name">${esc(teamName(state.teams,m.teamB))}</span></div>
+    <div class="live-score-pair"><span class="live-score-one">${Number(m.scoreA ?? 0)}</span><span class="live-score-one">${Number(m.scoreB ?? 0)}</span></div>
+  </article>`;
+}
+function livePanel(){ return `<section class="projector-panel"><h2>Risultati live · ${currentTitle()}</h2><div class="live-box-grid">${currentMatches().map(liveBox).join('')}</div></section>`; }
+function standingsPanel(){
+  const playing = playingIds(); const rows = computeStandings(state.teams, state.matches, state.scoringRules, 'live');
+  return `<section class="projector-panel"><h2>Classifica</h2><div class="standings-wrap"><table class="display-rank"><colgroup><col style="width:58px"><col style="width:190px"><col style="width:54px"><col style="width:62px"></colgroup><thead><tr><th class="pos">#</th><th class="team-col">Squadra</th><th class="num">PG</th><th class="num">Pt</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="${i<16?'q':'e'}"><td class="pos">${i+1}</td><td class="team-cell"><div class="stand-team"><span class="stand-name">${esc(r.name)}</span>${playing.has(r.id)?'<span class="playing-mini">In gioco</span>':''}</div></td><td class="num">${r.played}</td><td class="num"><b>${r.pts}</b></td></tr>`).join('')}</tbody></table></div></section>`;
+}
+function turnTable(slot, title, showScore=false){
+  if(isPO()) return `<section class="projector-panel turn-mini"><h2>${title}</h2><p class="muted-empty">Playoff attivi</p></section>`;
+  const ms = matchesFor(slot);
+  return `<section class="projector-panel turn-mini"><h2>${title}${ms.length ? ` · T${slot}` : ''}</h2>${ms.length ? `<table class="turn-table"><tbody>${ms.map(m=>`<tr><td>${sportIcon(m.sport)}</td><td><span class="field-pill">${fieldNumber(m.field)}</span></td><td class="teams-cell">${esc(teamName(state.teams,m.teamA))} - ${esc(teamName(state.teams,m.teamB))}</td>${showScore ? `<td class="result-cell">${esc(matchScore(m))}</td>` : ''}</tr>`).join('')}</tbody></table>` : '<p class="muted-empty">Nessun turno</p>'}</section>`;
+}
+function clockBlock(t, phase, rem, slot){ const label = isPO() ? `${esc(phaseLabel(phase))} · ${esc(currentTitle())}` : `${esc(phaseLabel(phase))} · Turno ${slot} · ${slotStartLabel(t, slot)}`; return `<section class="projector-clock"><button id="fullscreenBtn" class="btn primary">Schermo intero</button><div class="projector-clock-label">${label}</div><div id="clock" class="projector-clock-number ${phaseClass(phase)}">${fmtTime(rem)}</div></section>`; }
+function overlay(t, phase, rem){ if(!t?.timerRunning || rem > 10 || !['game','break'].includes(phase)) return ''; const done = rem <= 0; const label = done ? (phase === 'game' ? 'STOP' : 'GO') : String(Math.max(0, Math.ceil(rem))); const labelClass = done ? (phase === 'game' ? 'word stop' : 'word go') : 'seconds'; return `<div class="countdown-overlay ${phase==='game'?'game':'break'}"><div class="${labelClass}">${label}</div><p>${phase === 'game' ? 'Fine turno di gioco' : 'Fine pausa'}</p></div>`; }
+function draw(){
+  const t = state.tournament || {}, phase = tournamentPhase(t), rem = timerRemaining(t), slot = currentSlot();
+  document.querySelector('#app').innerHTML = `${overlay(t, phase, rem)}${clockBlock(t, phase, rem, isPO()?currentTitle():slot)}<section class="projector-grid">${livePanel()}${standingsPanel()}<aside class="turns-stack">${slot > 1 ? turnTable(slot-1,'Turno appena concluso', true) : turnTable(0,'Turno appena concluso', true)}${turnTable(slot+1,'Turno successivo', false)}</aside></section>`;
+  const fs = document.querySelector('#fullscreenBtn'); if(fs) fs.onclick = () => document.fullscreenElement ? document.exitFullscreen?.() : document.documentElement.requestFullscreen?.();
+  clearInterval(tick); tick = setInterval(()=>{ const tt = state.tournament || {}, ph = tournamentPhase(tt), r = timerRemaining(tt); const c = document.querySelector('#clock'); if(c){ c.textContent = fmtTime(r); c.className = `projector-clock-number ${phaseClass(ph)}`; } if(tt.timerRunning && r <= 10 && ['game','break'].includes(ph)) draw(); }, 500);
+}
+listen('/', v => { state = v || {}; draw(); });
+</script>
+</body>
+</html>

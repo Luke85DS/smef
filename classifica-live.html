@@ -1,0 +1,10 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Classifica live</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, computeStandings} from './assets/js/app.js';
+renderTop('Classifica live','Include anche le partite in corso. Verde: playoff. Rosso: eliminazione.');
+function draw(s){
+ const rows = computeStandings(s?.teams, s?.matches, s?.scoringRules, 'live');
+ document.querySelector('#app').innerHTML = `<div class="card"><table><thead><tr><th>#</th><th>Squadra</th><th class="num">Punti live</th><th class="num">Punti ufficiali</th><th class="num">Diff live</th><th class="num">PG</th><th class="num">V</th><th class="num">N</th><th class="num">P</th><th class="num">PF</th><th class="num">PS</th><th class="num">DR</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="${i<16?'qualified':'eliminated'}"><td>${i+1}</td><td><b>${r.name}</b></td><td class="num"><b>${r.live}</b></td><td class="num">${r.official}</td><td class="num">${r.delta>0?'+':''}${r.delta}</td><td class="num">${r.played}</td><td class="num">${r.wins}</td><td class="num">${r.draws}</td><td class="num">${r.losses}</td><td class="num">${r.gf}</td><td class="num">${r.ga}</td><td class="num">${r.gd}</td></tr>`).join('')}</tbody></table><p class="muted">La linea playoff è dopo la posizione 16.</p></div>`;
+}
+listen('/', s => draw(s || {}));
+</script></body></html>

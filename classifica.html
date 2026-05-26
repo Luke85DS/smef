@@ -1,0 +1,24 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Classifica</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, computeStandings} from './assets/js/app.js';
+renderTop('Classifica','Punteggio unico aggiornato live. Verde: prime 16. Rosso: dalla 17 in poi.');
+function escapeHtml(v){ return String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }
+function currentPlayingSet(state){
+  const currentSlot = Number(state?.tournament?.currentSlot || 1);
+  const out = new Set();
+  Object.values(state?.matches || {}).forEach(m => {
+    if(m.status !== 'in_progress') return;
+    if(Number(m.slot || currentSlot) !== currentSlot) return;
+    if(m.teamA) out.add(m.teamA);
+    if(m.teamB) out.add(m.teamB);
+  });
+  return out;
+}
+function draw(s){
+ const state = s || {};
+ const rows = computeStandings(state.teams, state.matches, state.scoringRules, 'live');
+ const playing = currentPlayingSet(state);
+ document.querySelector('#app').innerHTML = `<div class="card"><table><thead><tr><th>#</th><th>Squadra</th><th class="num">Punti</th><th class="num">PG</th><th class="num">V</th><th class="num">N</th><th class="num">P</th><th class="num">PF</th><th class="num">PS</th><th class="num">DP</th></tr></thead><tbody>${rows.map((r,i)=>`<tr class="${i<16?'qualified':'eliminated'}"><td>${i+1}</td><td><b>${escapeHtml(r.name)}</b>${playing.has(r.id)?`<div class="playing-badge">In gioco</div>`:''}</td><td class="num"><b>${r.pts}</b></td><td class="num">${r.played}</td><td class="num">${r.wins}</td><td class="num">${r.draws}</td><td class="num">${r.losses}</td><td class="num">${r.gf}</td><td class="num">${r.ga}</td><td class="num">${r.gd}</td></tr>`).join('')}</tbody></table><p class="muted">Il punteggio include le partite in corso. La scritta “In gioco” scompare quando la partita viene finalizzata.</p></div>`;
+}
+listen('/', s => draw(s || {}));
+</script></body></html>

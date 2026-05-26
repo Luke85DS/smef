@@ -1,0 +1,48 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Calendario</title><link rel="stylesheet" href="assets/css/style.css"><style>
+.cal-table{width:100%;table-layout:fixed;border-collapse:collapse}.cal-table th,.cal-table td{white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.cal-table .sport-cell{width:68px!important;min-width:68px!important;max-width:68px!important;text-align:center;padding-left:6px!important;padding-right:6px!important}.cal-table th.sport-cell{font-size:13px!important;letter-spacing:.04em}.cal-table .field-num,.cal-table .field-head{width:72px!important;min-width:72px!important;text-align:center}.cal-table .result-col,.cal-table .num{width:82px;text-align:right}.cal-table .status-col{width:118px}.cal-teams{min-width:0}.filter-card + .card{margin-top:18px}.card.current-turn{outline:2px solid var(--accent);outline-offset:3px}.team-calendar{width:100%;table-layout:fixed}.team-calendar th,.team-calendar td{white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}.team-calendar .turn-col{width:70px;text-align:center}.team-calendar .time-col{width:82px;text-align:center}.team-calendar .sport-cell{width:68px!important;min-width:68px!important;max-width:68px!important;text-align:center;padding-left:6px!important;padding-right:6px!important}.team-calendar th.sport-cell{font-size:13px!important;letter-spacing:.04em}.team-calendar .field-num,.team-calendar .field-head{width:72px!important;text-align:center}.team-calendar .opp-col{width:auto;min-width:380px}.team-calendar .result-col{width:76px}.team-calendar .status-col{width:108px}.team-calendar .rest-row td{height:58px}.team-calendar .current-turn-row{outline:2px solid var(--accent)!important;outline-offset:-2px;background:rgba(56,189,248,.07)!important}.team-calendar td:nth-child(1),.team-calendar td:nth-child(2),.team-calendar th:nth-child(1),.team-calendar th:nth-child(2){text-align:center!important}@media(max-width:760px){.cal-scroll{overflow-x:auto}.cal-table,.team-calendar{min-width:760px}}
+</style></head><body>
+<script type="module">
+import {renderTop, listen, asArray, teamName, slotStartLabel, fmtStatus, sportIcon, fieldNumber, matchScore} from './assets/js/app.js';
+renderTop('Calendario','Programma completo del torneo e calendario per squadra.');
+let selectedTeam = 'all';
+function escapeHtml(v){ return String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }
+function bySlot(matches){
+ const groups = new Map();
+ for(const m of matches){ const slot = Number(m.slot || 0); if(!groups.has(slot)) groups.set(slot, []); groups.get(slot).push(m); }
+ return Array.from(groups.entries()).sort((a,b)=>a[0]-b[0]);
+}
+function allSlots(matches){
+ const nums = asArray(matches).map(m=>Number(m.slot||0)).filter(Boolean);
+ const max = Math.max(0, ...nums); return Array.from({length:max}, (_,i)=>i+1);
+}
+function teamOptions(teams){
+ return `<option value="all">Tutte le squadre</option>` + Object.entries(teams || {}).sort((a,b)=>String(a[1].name).localeCompare(String(b[1].name))).map(([id,t]) => `<option value="${id}" ${id===selectedTeam?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
+}
+function fieldCell(field){ return `<td class="field-num"><span>${fieldNumber(field)}</span></td>`; }
+function rowsHtml(s, rows){
+ return rows.sort((a,b)=>String(a.field).localeCompare(String(b.field))).map(m=>`<tr><td class="sport-cell">${sportIcon(m.sport)}</td>${fieldCell(m.field)}<td class="cal-teams">${escapeHtml(teamName(s?.teams,m.teamA))} - ${escapeHtml(teamName(s?.teams,m.teamB))}</td><td class="num result-col"><b>${matchScore(m)}</b></td><td class="status-col">${fmtStatus(m.status)}</td></tr>`).join('');
+}
+function teamRowsHtml(s){
+ const cur = Number(s?.tournament?.currentSlot || 1);
+ const slots = allSlots(s?.matches);
+ const matches = asArray(s?.matches);
+ return slots.map(slot => {
+   const m = matches.find(x => Number(x.slot) === slot && (x.teamA === selectedTeam || x.teamB === selectedTeam));
+   const cls = slot === cur ? 'current-turn-row' : '';
+   if(!m) return `<tr class="${cls} rest-row"><td class="turn-col"><b>${slot}</b></td><td class="time-col">${slotStartLabel(s?.tournament, slot)}</td><td class="sport-cell"></td><td class="field-num"></td><td class="opp-col"><b>Riposo</b></td><td class="num result-col"></td><td class="status-col"></td></tr>`;
+   const opp = m.teamA === selectedTeam ? m.teamB : m.teamA;
+   return `<tr class="${cls}"><td class="num turn-col"><b>${slot}</b></td><td class="time-col">${slotStartLabel(s?.tournament, slot)}</td><td class="sport-cell">${sportIcon(m.sport)}</td>${fieldCell(m.field)}<td class="opp-col">${escapeHtml(teamName(s?.teams, opp))}</td><td class="num result-col"><b>${matchScore(m)}</b></td><td class="status-col">${fmtStatus(m.status)}</td></tr>`;
+ }).join('');
+}
+function draw(s){
+ const cur = Number(s?.tournament?.currentSlot || 1);
+ const all = asArray(s?.matches);
+ const groups = bySlot(all);
+ const content = selectedTeam === 'all'
+ ? (groups.length ? groups.map(([slot, rows]) => `<div class="card ${slot===cur?'current-turn':''}"><h2>Turno ${slot} · ${slotStartLabel(s?.tournament, slot)}</h2><div class="cal-scroll"><table class="compact-table cal-table"><thead><tr><th class="sport-cell">Sport</th><th class="field-head">Campo</th><th>Squadre</th><th class="num result-col">Ris.</th><th class="status-col">Stato</th></tr></thead><tbody>${rowsHtml(s, rows)}</tbody></table></div></div>`).join('<br>') : '<div class="card"><p class="muted">Nessuna partita trovata.</p></div>')
+ : `<div class="card"><h2>${escapeHtml(teamName(s?.teams, selectedTeam))}</h2><div class="cal-scroll"><table class="compact-table team-calendar"><thead><tr><th class="turn-col">Turno</th><th class="time-col">Ora</th><th class="sport-cell">Sport</th><th class="field-head">Campo</th><th class="opp-col">Avversario</th><th class="num result-col">Ris.</th><th class="status-col">Stato</th></tr></thead><tbody>${teamRowsHtml(s)}</tbody></table></div></div>`;
+ document.querySelector('#app').innerHTML = `<div class="card filter-card"><div class="formline"><label for="teamFilter">Squadra</label><select id="teamFilter" class="select">${teamOptions(s?.teams)}</select></div></div>${content}`;
+ document.querySelector('#teamFilter').onchange = e => { selectedTeam = e.target.value; draw(s); };
+}
+listen('/', s => draw(s || {}));
+</script></body></html>

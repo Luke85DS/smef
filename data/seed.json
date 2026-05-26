@@ -1,0 +1,305 @@
+{
+  "teams": {
+    "team01": {
+      "name": "Squadra 01"
+    },
+    "team02": {
+      "name": "Squadra 02"
+    },
+    "team03": {
+      "name": "Squadra 03"
+    },
+    "team04": {
+      "name": "Squadra 04"
+    },
+    "team05": {
+      "name": "Squadra 05"
+    },
+    "team06": {
+      "name": "Squadra 06"
+    },
+    "team07": {
+      "name": "Squadra 07"
+    },
+    "team08": {
+      "name": "Squadra 08"
+    }
+  },
+  "fields": {
+    "calcio1": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "calcio2": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "volley1": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "volley2": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "basket1": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "basket2": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "ultimate1": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    },
+    "ultimate2": {
+      "ready": false,
+      "status": "waiting",
+      "currentMatch": null
+    }
+  },
+  "tournament": {
+    "currentSlot": 1,
+    "timerRunning": false,
+    "timerStart": null,
+    "timerDuration": 900,
+    "phase": "waiting",
+    "gameDuration": 900,
+    "breakDuration": 180,
+    "autoStartWhenAllReady": true,
+    "startTime": "14:00"
+  },
+  "matches": {
+    "m001": {
+      "slot": 1,
+      "sport": "calcio",
+      "field": "calcio1",
+      "teamA": "team01",
+      "teamB": "team02",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m002": {
+      "slot": 1,
+      "sport": "calcio",
+      "field": "calcio2",
+      "teamA": "team03",
+      "teamB": "team04",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m003": {
+      "slot": 1,
+      "sport": "volley",
+      "field": "volley1",
+      "teamA": "team05",
+      "teamB": "team06",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m004": {
+      "slot": 1,
+      "sport": "volley",
+      "field": "volley2",
+      "teamA": "team07",
+      "teamB": "team08",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m005": {
+      "slot": 1,
+      "sport": "basket",
+      "field": "basket1",
+      "teamA": "team01",
+      "teamB": "team03",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m006": {
+      "slot": 1,
+      "sport": "basket",
+      "field": "basket2",
+      "teamA": "team02",
+      "teamB": "team04",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m007": {
+      "slot": 1,
+      "sport": "ultimate",
+      "field": "ultimate1",
+      "teamA": "team05",
+      "teamB": "team07",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m008": {
+      "slot": 1,
+      "sport": "ultimate",
+      "field": "ultimate2",
+      "teamA": "team06",
+      "teamB": "team08",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m009": {
+      "slot": 2,
+      "sport": "calcio",
+      "field": "calcio1",
+      "teamA": "team01",
+      "teamB": "team04",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m010": {
+      "slot": 2,
+      "sport": "calcio",
+      "field": "calcio2",
+      "teamA": "team02",
+      "teamB": "team03",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m011": {
+      "slot": 2,
+      "sport": "volley",
+      "field": "volley1",
+      "teamA": "team05",
+      "teamB": "team08",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    },
+    "m012": {
+      "slot": 2,
+      "sport": "volley",
+      "field": "volley2",
+      "teamA": "team06",
+      "teamB": "team07",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "scheduled"
+    }
+  },
+  "scoringRules": {
+    "draw": {
+      "each": 3
+    },
+    "sports": {
+      "basket": {
+        "label": "Basket",
+        "margins": [
+          {
+            "code": "MB",
+            "maxDiff": 7,
+            "winner": 4,
+            "loser": 2
+          },
+          {
+            "code": "MM",
+            "maxDiff": 14,
+            "winner": 5,
+            "loser": 1
+          },
+          {
+            "code": "MA",
+            "maxDiff": null,
+            "winner": 6,
+            "loser": 0
+          }
+        ]
+      },
+      "volley": {
+        "label": "Pallavolo",
+        "margins": [
+          {
+            "code": "MB",
+            "maxDiff": 5,
+            "winner": 4,
+            "loser": 2
+          },
+          {
+            "code": "MM",
+            "maxDiff": 10,
+            "winner": 5,
+            "loser": 1
+          },
+          {
+            "code": "MA",
+            "maxDiff": null,
+            "winner": 6,
+            "loser": 0
+          }
+        ]
+      },
+      "calcio": {
+        "label": "Calcio a 5",
+        "margins": [
+          {
+            "code": "MB",
+            "maxDiff": 2,
+            "winner": 4,
+            "loser": 2
+          },
+          {
+            "code": "MM",
+            "maxDiff": 3,
+            "winner": 5,
+            "loser": 1
+          },
+          {
+            "code": "MA",
+            "maxDiff": null,
+            "winner": 6,
+            "loser": 0
+          }
+        ]
+      },
+      "ultimate": {
+        "label": "Frisbee",
+        "margins": [
+          {
+            "code": "MB",
+            "maxDiff": 2,
+            "winner": 4,
+            "loser": 2
+          },
+          {
+            "code": "MM",
+            "maxDiff": 3,
+            "winner": 5,
+            "loser": 1
+          },
+          {
+            "code": "MA",
+            "maxDiff": null,
+            "winner": 6,
+            "loser": 0
+          }
+        ]
+      }
+    }
+  },
+  "playoffs": {
+    "matches": {}
+  }
+}

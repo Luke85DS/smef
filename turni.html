@@ -1,0 +1,16 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Turni e risultati</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, asArray, teamName, slotStartLabel, fmtStatus, sportIcon, fieldNumber, matchScore} from './assets/js/app.js';
+renderTop('Turni e risultati','Turno appena concluso, turno in corso e prossimo turno.');
+function escapeHtml(v){ return String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }
+function fieldCell(field){ return `<td class="field-num"><span>${fieldNumber(field)}</span></td>`; }
+function tableFor(s, slot, label, cls){
+ const matches = asArray(s?.matches).filter(m=>Number(m.slot)===Number(slot)).sort((a,b)=>String(a.field).localeCompare(String(b.field)));
+ if(!matches.length) return '';
+ return `<div class="card ${cls||''}"><h2>${label}: Turno ${slot} · ${slotStartLabel(s?.tournament, slot)}</h2><table class="compact-table"><thead><tr><th>Sport</th><th class="field-head">Campo</th><th>Squadre</th><th class="num">Ris.</th><th>Stato</th></tr></thead><tbody>${matches.map(m=>`<tr><td class="sport-cell">${sportIcon(m.sport)}</td>${fieldCell(m.field)}<td>${escapeHtml(teamName(s?.teams,m.teamA))} - ${escapeHtml(teamName(s?.teams,m.teamB))}</td><td class="num"><b>${matchScore(m)}</b></td><td>${fmtStatus(m.status)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+listen('/', s => {
+ const cur = Number(s?.tournament?.currentSlot || 1);
+ document.querySelector('#app').innerHTML = `${cur>1 ? tableFor(s, cur-1, 'Appena concluso') + '<br>' : ''}${tableFor(s, cur, 'In corso', 'current-turn') || '<div class="card"><p class="muted">Nessun turno in corso.</p></div>'}<br>${tableFor(s, cur+1, 'Prossimo') || '<div class="card"><h2>Prossimo turno</h2><p class="muted">Nessun turno successivo.</p></div>'}`;
+});
+</script></body></html>

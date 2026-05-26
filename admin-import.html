@@ -1,0 +1,154 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Import</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, requireAdmin, read, write, patch, asArray, teamName} from './assets/js/app.js';
+renderTop('Admin import','Importa squadre e calendario da CSV o JSON');
+if(!requireAdmin()) throw new Error('Area admin bloccata');
+document.querySelector('.brand').insertAdjacentHTML('beforeend', '<div class="row admin-tools"><a class="btn warn" href="admin.html">Regia</a><a class="btn primary" href="admin-setup.html">Setup</a><a class="btn" href="admin-import.html">Import</a><button id="adminLogout" class="btn bad" type="button">Esci</button></div>');
+document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href='index.html'; });
+let parsed = {teams:null, matches:null, fields:null, errors:[], warnings:[]};
+let existing = {};
+const appEl = document.querySelector('#app');
+
+function norm(s){return String(s||'').trim();}
+function key(s){return norm(s).toLowerCase().replace(/[àá]/g,'a').replace(/[èé]/g,'e').replace(/[ìí]/g,'i').replace(/[òó]/g,'o').replace(/[ùú]/g,'u').replace(/[^a-z0-9]/g,'');}
+function slug(s, fallback='id'){
+  const v = norm(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  return v || fallback;
+}
+function splitCSVLine(line, sep){
+  const out=[]; let cur='', q=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i], nx=line[i+1];
+    if(ch==='"' && q && nx==='"'){cur+='"'; i++; continue;}
+    if(ch==='"'){q=!q; continue;}
+    if(ch===sep && !q){out.push(cur); cur=''; continue;}
+    cur+=ch;
+  }
+  out.push(cur); return out.map(x=>x.trim());
+}
+function parseCSV(text){
+  const raw = text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l=>l.trim().length);
+  if(raw.length<2) throw new Error('CSV vuoto o senza righe dati');
+  const sep = (raw[0].split(';').length > raw[0].split(',').length) ? ';' : ',';
+  const headers = splitCSVLine(raw[0], sep).map(key);
+  return raw.slice(1).map(line=>{
+    const vals=splitCSVLine(line, sep), obj={};
+    headers.forEach((h,i)=>obj[h]=vals[i] ?? '');
+    return obj;
+  });
+}
+function pick(row, names){ for(const n of names){const k=key(n); if(row[k]!==undefined && norm(row[k])!=='') return norm(row[k]);} return ''; }
+function normalizeSport(s){
+  const v=key(s);
+  if(v.includes('basket')) return 'basket';
+  if(v.includes('volley')||v.includes('pallavolo')) return 'volley';
+  if(v.includes('calcio')||v.includes('football')||v.includes('futsal')) return 'calcio';
+  if(v.includes('frisbee')||v.includes('ultimate')) return 'ultimate';
+  return norm(s).toLowerCase();
+}
+function parseTeamsRows(rows){
+  const teams={}, warnings=[], errors=[];
+  rows.forEach((r,i)=>{
+    const name = pick(r,['name','nome','squadra','team','teamname','nome squadra']);
+    const idRaw = pick(r,['id','teamid','codice','codice squadra']);
+    if(!name){warnings.push(`Riga squadre ${i+2}: nome mancante, ignorata`); return;}
+    const id = idRaw ? slug(idRaw,'team') : slug(name,'team');
+    if(teams[id]) warnings.push(`ID squadra duplicato "${id}": tengo l'ultima occorrenza`);
+    teams[id] = {name};
+  });
+  if(!Object.keys(teams).length) errors.push('Nessuna squadra valida trovata');
+  return {teams,warnings,errors};
+}
+function nameToTeamId(teams){
+  const map={};
+  Object.entries(teams||{}).forEach(([id,t])=>{map[key(t.name)]=id; map[key(id)]=id;});
+  return map;
+}
+function parseMatchesRows(rows, teams){
+  const matches={}, fields={}, warnings=[], errors=[], teamMap=nameToTeamId(teams||{});
+  rows.forEach((r,i)=>{
+    const n=i+2;
+    const slot = Number(pick(r,['slot','turno','round','numero turno','n turno']));
+    const sport = normalizeSport(pick(r,['sport','disciplina','gioco']));
+    const field = slug(pick(r,['field','campo','campoid','campo id']),'campo');
+    const aRaw = pick(r,['teamA','squadraA','casa','team1','squadra1','a']);
+    const bRaw = pick(r,['teamB','squadraB','ospite','team2','squadra2','b']);
+    const teamA = teamMap[key(aRaw)] || slug(aRaw,'team');
+    const teamB = teamMap[key(bRaw)] || slug(bRaw,'team');
+    if(!slot) errors.push(`Riga calendario ${n}: turno mancante o non numerico`);
+    if(!sport) errors.push(`Riga calendario ${n}: sport mancante`);
+    if(!field) errors.push(`Riga calendario ${n}: campo mancante`);
+    if(!aRaw || !bRaw) errors.push(`Riga calendario ${n}: squadra A/B mancante`);
+    if(aRaw && teams && !teams[teamA]) warnings.push(`Riga calendario ${n}: squadra A "${aRaw}" non trovata tra le squadre importate/esistenti`);
+    if(bRaw && teams && !teams[teamB]) warnings.push(`Riga calendario ${n}: squadra B "${bRaw}" non trovata tra le squadre importate/esistenti`);
+    if(!slot || !sport || !field || !aRaw || !bRaw) return;
+    const id = slug(pick(r,['id','matchid','partita','codice']) || `m-${String(slot).padStart(2,'0')}-${field}-${teamA}-${teamB}`, 'match');
+    matches[id] = {slot, sport, field, teamA, teamB, scoreA:Number(pick(r,['scoreA','puntiA','risultatoA'])||0), scoreB:Number(pick(r,['scoreB','puntiB','risultatoB'])||0), status: pick(r,['status','stato']) || 'scheduled'};
+    fields[field] = {ready:false,status:'waiting',currentMatch:null};
+  });
+  if(!Object.keys(matches).length) errors.push('Nessuna partita valida trovata');
+  return {matches,fields,warnings,errors};
+}
+function parseJSON(text){
+  const obj=JSON.parse(text);
+  const out={warnings:[],errors:[]};
+  if(obj.teams) out.teams=obj.teams;
+  if(obj.matches) out.matches=obj.matches;
+  if(obj.fields) out.fields=obj.fields;
+  if(!out.teams && !out.matches) out.errors.push('JSON valido, ma non contiene teams o matches');
+  return out;
+}
+async function loadExisting(){ existing = await read('/') || {}; }
+function preview(){
+  const teamsN = parsed.teams ? Object.keys(parsed.teams).length : 0;
+  const matchesN = parsed.matches ? Object.keys(parsed.matches).length : 0;
+  const fieldsN = parsed.fields ? Object.keys(parsed.fields).length : 0;
+  const sampleTeams = Object.entries(parsed.teams||{}).slice(0,8).map(([id,t])=>`<tr><td>${id}</td><td>${t.name}</td></tr>`).join('');
+  const sampleMatches = Object.entries(parsed.matches||{}).slice(0,12).map(([id,m])=>`<tr><td>${id}</td><td>${m.slot}</td><td>${m.field}</td><td>${m.sport}</td><td>${teamName(parsed.teams||existing.teams,m.teamA)}</td><td>${teamName(parsed.teams||existing.teams,m.teamB)}</td></tr>`).join('');
+  document.querySelector('#preview').innerHTML = `<div class="grid"><div class="card"><h2>Anteprima</h2><p><b>${teamsN}</b> squadre · <b>${matchesN}</b> partite · <b>${fieldsN}</b> campi</p>${parsed.errors.length?`<div class="notice danger"><b>Errori</b><br>${parsed.errors.join('<br>')}</div>`:''}${parsed.warnings.length?`<div class="notice"><b>Avvisi</b><br>${parsed.warnings.slice(0,12).join('<br>')}${parsed.warnings.length>12?'<br>...':''}</div>`:''}</div></div>${teamsN?`<br><div class="card"><h2>Prime squadre</h2><table><thead><tr><th>ID</th><th>Nome</th></tr></thead><tbody>${sampleTeams}</tbody></table></div>`:''}${matchesN?`<br><div class="card"><h2>Prime partite</h2><table><thead><tr><th>ID</th><th>Turno</th><th>Campo</th><th>Sport</th><th>Squadra A</th><th>Squadra B</th></tr></thead><tbody>${sampleMatches}</tbody></table></div>`:''}`;
+  document.querySelector('#importBtn').disabled = !!parsed.errors.length || (!parsed.teams && !parsed.matches);
+}
+async function handleFile(kind){
+  await loadExisting();
+  parsed={teams:null,matches:null,fields:null,errors:[],warnings:[]};
+  const file=document.querySelector('#file').files[0];
+  if(!file){parsed.errors.push('Seleziona un file'); preview(); return;}
+  const text=await file.text();
+  try{
+    if(file.name.toLowerCase().endsWith('.json')){
+      const out=parseJSON(text); Object.assign(parsed,out);
+    } else if(kind==='teams'){
+      const out=parseTeamsRows(parseCSV(text)); Object.assign(parsed,out);
+    } else if(kind==='matches'){
+      const out=parseMatchesRows(parseCSV(text), existing.teams); Object.assign(parsed,out);
+    } else {
+      const rows=parseCSV(text);
+      const teamOut=parseTeamsRows(rows);
+      if(!teamOut.errors.length && Object.keys(teamOut.teams).length){ Object.assign(parsed,teamOut); }
+      else { Object.assign(parsed,parseMatchesRows(rows, existing.teams)); }
+    }
+  } catch(e){ parsed.errors.push(e.message); }
+  preview();
+}
+async function doImport(){
+  const mode=document.querySelector('input[name="mode"]:checked').value;
+  if(parsed.errors.length) return;
+  if(!confirm(mode==='replace' ? 'Sovrascrivere squadre, calendario e campi interessati?' : 'Importare unendo ai dati esistenti?')) return;
+  if(mode==='replace'){
+    if(parsed.teams) await write('teams', parsed.teams);
+    if(parsed.matches) await write('matches', parsed.matches);
+    if(parsed.fields) await write('fields', parsed.fields);
+  } else {
+    if(parsed.teams) await patch('teams', parsed.teams);
+    if(parsed.matches) await patch('matches', parsed.matches);
+    if(parsed.fields) await patch('fields', parsed.fields);
+  }
+  await patch('tournament', {currentSlot:1, phase:'waiting', timerRunning:false, timerStart:null});
+  document.querySelector('#done').innerHTML='<div class="notice"><b>Import completato.</b> Controlla Calendario completo e Turni prima di usare il torneo.</div>';
+}
+appEl.innerHTML = `<div class="card"><h2>Import squadre e calendario</h2><p class="muted">Accetta CSV o JSON. Prima fa anteprima e validazione, poi scrive su Firebase.</p><div class="formline"><input id="file" type="file" accept=".csv,.json,text/csv,application/json"></div><div class="row"><button class="btn" id="parseTeams">Leggi come squadre</button><button class="btn" id="parseMatches">Leggi come calendario</button><button class="btn" id="parseAuto">Auto</button></div><hr style="border-color:var(--line);margin:16px 0"><div class="formline"><label><input type="radio" name="mode" value="merge" checked> Unisci ai dati esistenti</label><label><input type="radio" name="mode" value="replace"> Sostituisci sezioni importate</label></div><button id="importBtn" class="btn primary" disabled>Importa in Firebase</button><div id="done" style="margin-top:12px"></div></div><br><div class="card"><h2>Formato CSV squadre</h2><pre>id,nome\nteam01,Squadra 01\nteam02,Squadra 02</pre><h2>Formato CSV calendario</h2><pre>id,turno,sport,campo,squadraA,squadraB\nm001,1,calcio,calcio1,team01,team02\nm002,1,volley,volley1,Squadra 03,Squadra 04</pre><p class="muted">Puoi usare ID squadra oppure nome squadra. Campi e sport vengono normalizzati.</p></div><br><div id="preview"></div>`;
+document.querySelector('#parseTeams').onclick=()=>handleFile('teams');
+document.querySelector('#parseMatches').onclick=()=>handleFile('matches');
+document.querySelector('#parseAuto').onclick=()=>handleFile('auto');
+document.querySelector('#importBtn').onclick=doImport;
+</script></body></html>

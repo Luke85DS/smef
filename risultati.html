@@ -1,0 +1,10 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Risultati live</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, asArray, teamName, fmtStatus, describeMatchPoints, slotStartLabel} from './assets/js/app.js';
+renderTop('Risultati live','Solo turno corrente');
+listen('/', s => {
+ const cur = s?.tournament?.currentSlot || 1;
+ const matches = asArray(s?.matches).filter(m=>m.slot===cur).sort((a,b)=>String(a.field).localeCompare(String(b.field)));
+ document.querySelector('#app').innerHTML = `<div class="notice"><b>Turno ${cur}</b> · orario gioco ${slotStartLabel(s?.tournament, cur)}</div><br><div class="card"><table><thead><tr><th>Campo</th><th>Sport</th><th>Partita</th><th class="num">Risultato</th><th>Stato</th><th class="num">Punti partita</th></tr></thead><tbody>${matches.map(m=>`<tr><td>${m.field}</td><td>${m.sport}</td><td>${teamName(s?.teams,m.teamA)} - ${teamName(s?.teams,m.teamB)}</td><td class="num"><b>${m.scoreA ?? 0} - ${m.scoreB ?? 0}</b></td><td class="status-${m.status}">${fmtStatus(m.status)}</td><td class="num">${describeMatchPoints(m, s?.scoringRules)}</td></tr>`).join('')}</tbody></table></div>`;
+});
+</script></body></html>

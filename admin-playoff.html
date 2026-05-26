@@ -1,0 +1,175 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Playoff</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, patch, write, asArray, teamName, playoffSeedRows, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore} from './assets/js/app.js';
+renderTop('Admin playoff','Gestione tabellone, sport, campi e avanzamento playoff.');
+if(!requireAdmin()) throw new Error('Area admin bloccata');
+let state = {};
+const sports = [['calcio','Calcio a 5'], ['volley','Pallavolo'], ['basket','Basket'], ['ultimate','Frisbee']];
+const roundLabels = {r16:'Ottavi', qf:'Quarti', sf:'Semifinali', final:'Finale'};
+const roundOrder = ['r16','qf','sf','final'];
+const roundClass = {r16:'r16', qf:'qf', sf:'sf', final:'final'};
+const nextRound = {r16:'qf', qf:'sf', sf:'final'};
+const matchCount = {r16:8, qf:4, sf:2, final:1};
+const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function seedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules); }
+function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id,i+1])); }
+function eliminatedSet(){
+ const out = new Set();
+ const matches = state.playoffs?.matches || {};
+ for(const m of Object.values(matches)){
+   if(!m?.winner) continue;
+   if(m.teamA && m.teamA !== m.winner) out.add(m.teamA);
+   if(m.teamB && m.teamB !== m.winner) out.add(m.teamB);
+ }
+ return out;
+}
+function qualifiedGrid(){
+ const rows = seedRows();
+ const eliminated = eliminatedSet();
+ return `<section class="card playoff-qualified-card"><h2>Qualificate playoff</h2><div class="playoff-qualified-grid">${rows.slice(0,16).map((r,i)=>{
+   const rank = i + 1;
+   const isOut = eliminated.has(r.id);
+   return `<div class="playoff-qualified-item"><div class="qualified-rank">#${rank}</div><div class="qualified-team-box ${isOut ? 'is-out' : 'is-in'}">${esc(r.name)}</div></div>`;
+ }).join('')}</div></section>`;
+}
+function betterSeed(teamA, teamB){ const pos = seedMap(); return (pos[teamA] || 999) <= (pos[teamB] || 999) ? teamA : teamB; }
+function allFields(){
+ const ids = new Set();
+ asArray(state.matches).forEach(m=>{ if(m.field) ids.add(m.field); });
+ Object.keys(state.fields || {}).forEach(k=>ids.add(k));
+ return [...ids].sort((a,b)=>String(a).localeCompare(String(b),'it',{numeric:true}));
+}
+function emptyMatch(round,index){ return {round,index,teamA:null,teamB:null,chooser:null,sport:null,field:null,scoreA:0,scoreB:0,winner:null,status:'scheduled'}; }
+function initialBracket(){
+ const seeds = seedRows();
+ const out = {};
+ for(let i=1;i<=8;i++){
+   const a=seeds[i-1], b=seeds[16-i];
+   out[`r16_${i}`] = {...emptyMatch('r16',i), teamA:a?.id || null, teamB:b?.id || null, chooser:a?.id || null};
+ }
+ for(let i=1;i<=4;i++) out[`qf_${i}`] = emptyMatch('qf',i);
+ for(let i=1;i<=2;i++) out[`sf_${i}`] = emptyMatch('sf',i);
+ out.final_1 = emptyMatch('final',1);
+ return out;
+}
+async function generateBracket(){
+ if(!confirm('Rigenerare il tabellone dagli attuali primi 16 della classifica? I dati playoff esistenti verranno sostituiti.')) return;
+ await write('playoffs/matches', initialBracket());
+ await patch('playoffs', {generatedAt: Date.now()});
+}
+function completedRound(round){
+ const rows = Object.values(state.playoffs?.matches || {}).filter(m=>m.round===round);
+ return rows.length === matchCount[round] && rows.every(m=>m.winner);
+}
+function winnersOf(round){
+ const p = state.playoffs?.matches || {};
+ return Object.values(p).filter(m=>m.round===round && m.winner).map(m=>m.winner);
+}
+async function rebuildRound(round, winners){
+ const pos = seedMap();
+ const sorted = [...new Set(winners)].sort((a,b)=>(pos[a]||999)-(pos[b]||999));
+ const count = matchCount[round];
+ const updates = {};
+ for(let i=1;i<=count;i++){
+   const a = sorted[i-1] || null;
+   const b = sorted[sorted.length-i] || null;
+   const id = `${round}_${i}`;
+   const old = state.playoffs?.matches?.[id] || emptyMatch(round,i);
+   updates[id] = {...old, round, index:i, teamA:a, teamB:b, chooser:(a && b) ? betterSeed(a,b) : null, winner:null, status:'scheduled', scoreA:old.scoreA ?? 0, scoreB:old.scoreB ?? 0};
+ }
+ await patch('playoffs/matches', updates);
+}
+async function advanceFrom(round){
+ const nr = nextRound[round];
+ if(!nr || !completedRound(round)) return;
+ await rebuildRound(nr, winnersOf(round));
+}
+async function setSport(id, sport){
+ const m = state.playoffs?.matches?.[id]; if(!m) return;
+ const chooser = m.teamA && m.teamB ? betterSeed(m.teamA, m.teamB) : m.chooser;
+ if(sport && !canChooseSport(state.playoffs, chooser, sport, id)){
+   alert('Questa squadra ha gia scelto questo sport in un turno precedente.'); return;
+ }
+ await patch(`playoffs/matches/${id}`, {sport:sport || null, chooser});
+}
+async function setField(id, field){
+ const val = field || null;
+ await patch(`playoffs/matches/${id}`, {field: val});
+ if(val) await patch(`fields/${val}`, {playoffMatch:id});
+}
+async function setWinner(id, winner){
+ const m = state.playoffs?.matches?.[id]; if(!m || !winner) return;
+ await patch(`playoffs/matches/${id}`, {winner, status:'final'});
+ const roundRows = Object.entries(state.playoffs?.matches || {}).filter(([,x])=>x.round===m.round).map(([mid,x])=> mid===id ? {...x,winner,status:'final'} : x);
+ if(roundRows.length === matchCount[m.round] && roundRows.every(x=>x.winner)){
+   const nr = nextRound[m.round];
+   if(nr) await rebuildRound(nr, roundRows.map(x=>x.winner));
+ }
+}
+async function undoWinner(id){
+ const m = state.playoffs?.matches?.[id]; if(!m) return;
+ await patch(`playoffs/matches/${id}`, {winner:null, status:'in_progress'});
+}
+async function activateRound(round){
+ await patch('tournament', {mode:'playoff', playoffRound:round, phase:'waiting', timerRunning:false, timerStart:null});
+}
+async function backToGroup(){ await patch('tournament', {mode:'groups', playoffRound:null, phase:'waiting', timerRunning:false, timerStart:null}); }
+function scoreFor(m){ return `${Number(m.scoreA || 0)} - ${Number(m.scoreB || 0)}`; }
+function scoreNum(v){ return Number(v ?? 0); }
+function teamBlock(teamId, score, winner){
+ const pos = seedMap()[teamId];
+ return `<div class="po-team-block ${winner?'winner':''}">
+   <div class="po-seed">${pos ? `#${pos}` : '&nbsp;'}</div>
+   <div class="po-team-name">${esc(teamName(state.teams, teamId))}</div>
+   <div class="po-score-box">${scoreNum(score)}</div>
+ </div>`;
+}
+function bracketBox(id,m){
+ const empty = !m || (!m.teamA && !m.teamB);
+ const winnerA = m?.winner && m.winner === m.teamA;
+ const winnerB = m?.winner && m.winner === m.teamB;
+ return `<article class="playoff-box ${empty?'empty':''}">
+   <div class="playoff-box-meta"><span class="sport-big">${m?.sport ? sportIcon(m.sport) : '•'}</span>${m?.field ? `<span class="field-under">${fieldNumber(m.field)}</span>` : '<span class="field-under">-</span>'}</div>
+   <div class="po-teams-row">
+     ${teamBlock(m?.teamA, m?.scoreA, winnerA)}
+     ${teamBlock(m?.teamB, m?.scoreB, winnerB)}
+   </div>
+ </article>`;
+}
+function publicRound(round){
+ const p = state.playoffs?.matches || {};
+ const boxes = [];
+ for(let i=1;i<=matchCount[round];i++) boxes.push([`${round}_${i}`, p[`${round}_${i}`] || emptyMatch(round,i)]);
+ return `<section class="card playoff-round-card"><h2>${roundLabels[round]}</h2><div class="playoff-stage playoff-${roundClass[round]}">${boxes.map(([id,m])=>bracketBox(id,m)).join('')}</div></section>`;
+}
+function sportSelect(id,m){
+ const chooser = m.teamA && m.teamB ? betterSeed(m.teamA,m.teamB) : m.chooser;
+ return `<select data-action="sport" data-id="${id}"><option value="">Sport</option>${sports.map(([k,l])=>{
+   const blocked = chooser && !canChooseSport(state.playoffs, chooser, k, id) && sportKey(m.sport) !== sportKey(k);
+   return `<option value="${k}" ${sportKey(m.sport)===sportKey(k)?'selected':''} ${blocked?'disabled':''}>${l}${blocked?' (gia scelto)':''}</option>`;
+ }).join('')}</select>`;
+}
+function fieldSelect(id,m){
+ const fs = allFields();
+ return `<select data-action="field" data-id="${id}"><option value="">Campo</option>${fs.map(f=>`<option value="${esc(f)}" ${String(m.field||'')===String(f)?'selected':''}>Campo ${fieldNumber(f)}</option>`).join('')}</select>`;
+}
+function adminRow(id,m){
+ const chooser = m.teamA && m.teamB ? betterSeed(m.teamA,m.teamB) : m.chooser;
+ return `<tr><td>${roundLabels[m.round]} ${m.index}</td><td>${esc(teamName(state.teams,m.teamA))} - ${esc(teamName(state.teams,m.teamB))}<br><span class="muted">Scelta: ${esc(teamName(state.teams,chooser))}</span></td><td>${sportSelect(id,m)}</td><td>${fieldSelect(id,m)}</td><td class="num"><b>${scoreFor(m)}</b></td><td><div class="row"><button class="btn ok" data-action="winner" data-id="${id}" data-winner="${m.teamA}" ${!m.teamA||!m.teamB?'disabled':''}>Vince A</button><button class="btn ok" data-action="winner" data-id="${id}" data-winner="${m.teamB}" ${!m.teamA||!m.teamB?'disabled':''}>Vince B</button>${m.winner?`<button class="btn bad" data-action="undo" data-id="${id}">Annulla</button>`:''}</div></td></tr>`;
+}
+function adminPanel(){
+ const p = state.playoffs?.matches || {};
+ return `<section class="card admin-playoff-panel"><h2>Admin playoff</h2><p class="muted">Genera da classifica, assegna sport/campo e attiva il round per display e pagine campo.</p><div class="row"><button id="generate" class="btn primary">Genera da classifica</button>${roundOrder.map(r=>`<button class="btn ${state?.tournament?.playoffRound===r?'ok':'primary'}" data-action="activate" data-round="${r}">Attiva ${roundLabels[r]}</button>`).join('')}<button id="backGroup" class="btn warn">Torna ai turni</button></div><br>${roundOrder.map(round=>{ const rows=[]; for(let i=1;i<=matchCount[round];i++){ const id=`${round}_${i}`; rows.push([id,p[id]||emptyMatch(round,i)]); } return `<h3>${roundLabels[round]}</h3><table class="compact-table"><thead><tr><th>Box</th><th>Squadre</th><th>Sport</th><th>Campo</th><th class="num">Ris.</th><th>Vincente</th></tr></thead><tbody>${rows.map(([id,m])=>adminRow(id,m)).join('')}</tbody></table>`; }).join('') }</section>`;
+}
+function draw(){
+ document.querySelector('#app').innerHTML = `<div class="playoff-public">${qualifiedGrid()}${roundOrder.map(publicRound).join('')}</div><br>${adminPanel()}`;
+ const gen = document.querySelector('#generate'); if(gen) gen.onclick = generateBracket;
+ const bg = document.querySelector('#backGroup'); if(bg) bg.onclick = backToGroup;
+ document.querySelectorAll('[data-action="activate"]').forEach(el=>el.onclick=()=>activateRound(el.dataset.round));
+ document.querySelectorAll('[data-action="sport"]').forEach(el=>el.onchange=e=>setSport(e.target.dataset.id, e.target.value));
+ document.querySelectorAll('[data-action="field"]').forEach(el=>el.onchange=e=>setField(e.target.dataset.id, e.target.value));
+ document.querySelectorAll('[data-action="winner"]').forEach(el=>el.onclick=e=>setWinner(e.target.dataset.id, e.target.dataset.winner));
+ document.querySelectorAll('[data-action="undo"]').forEach(el=>el.onclick=e=>undoWinner(e.target.dataset.id));
+}
+listen('/', v=>{state=v||{}; draw();});
+</script></body></html>

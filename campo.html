@@ -1,0 +1,132 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Campo</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {listen, patch, fieldId, asArray, teamName, fmtStatus, fmtTime, timerRemaining, secondaryTimerLabel, phaseLabel, tournamentPhase, isPlayoffMode, playoffRoundLabel} from './assets/js/app.js';
+document.body.insertAdjacentHTML('afterbegin', `<div class="wrap field-service-wrap"><main id="app"></main></div>`);
+let state = {};
+let renderedMatchId = null;
+let scoreSaveTimer = null;
+let saving = false;
+function currentMatch(){
+ if(isPlayoffMode(state?.tournament)){
+   const round = state.tournament.playoffRound;
+   const found = asArray(state?.playoffs?.matches).find(m => m.field === fieldId && m.round === round);
+   return found ? {...found, _path:`playoffs/matches/${found.id}`, _isPlayoff:true, slot: playoffRoundLabel(round)} : null;
+ }
+ const slot = state?.tournament?.currentSlot || 1;
+ const found = asArray(state?.matches).find(m => m.field === fieldId && Number(m.slot) === Number(slot));
+ return found ? {...found, _path:`matches/${found.id}`, _isPlayoff:false} : null;
+}
+function matchPath(m){ return m._path || `matches/${m.id}`; }
+async function setReady(m){ await patch(`fields/${fieldId}`, {ready:true, status:'ready', currentMatch:m.id}); await patch(matchPath(m), {status:'ready'}); }
+async function unsetReady(m){ await patch(`fields/${fieldId}`, {ready:false, status:'waiting', currentMatch:m.id}); await patch(matchPath(m), {status:'scheduled'}); }
+async function saveScoreLive(m, a, b){
+ saving = true;
+ setSaveState('Salvataggio...');
+ await patch(matchPath(m), {scoreA:Number(a || 0), scoreB:Number(b || 0), status:'in_progress'});
+ await patch(`fields/${fieldId}`, {status:'in_progress', ready:true, currentMatch:m.id});
+ saving = false;
+ setSaveState('Salvato live');
+}
+async function final(m){
+ const a = document.querySelector('#a')?.value ?? m.scoreA ?? 0;
+ const b = document.querySelector('#b')?.value ?? m.scoreB ?? 0;
+ if(scoreSaveTimer) clearTimeout(scoreSaveTimer);
+ await saveScoreLive(m, a, b);
+ await patch(matchPath(m), {status:'final'});
+ await patch(`fields/${fieldId}`, {status:'final', ready:false, currentMatch:m.id});
+ setSaveState('Risultato finalizzato');
+}
+async function undoFinal(m){
+ const a = document.querySelector('#a')?.value ?? m.scoreA ?? 0;
+ const b = document.querySelector('#b')?.value ?? m.scoreB ?? 0;
+ if(scoreSaveTimer) clearTimeout(scoreSaveTimer);
+ await patch(matchPath(m), {scoreA:Number(a || 0), scoreB:Number(b || 0), status:'in_progress'});
+ await patch(`fields/${fieldId}`, {status:'in_progress', ready:true, currentMatch:m.id});
+ setSaveState('Finalizzazione annullata: risultato tornato live');
+}
+function setSaveState(text){ const el = document.querySelector('#saveState'); if(el) el.textContent = text; }
+function queueScoreSave(m){
+ if(scoreSaveTimer) clearTimeout(scoreSaveTimer);
+ setSaveState('Modifica non ancora salvata...');
+ scoreSaveTimer = setTimeout(() => {
+   const a = document.querySelector('#a')?.value ?? 0;
+   const b = document.querySelector('#b')?.value ?? 0;
+   saveScoreLive(m, a, b).catch(err => setSaveState(`Errore salvataggio: ${err.message || err}`));
+ }, 250);
+}
+function changeScore(m, inputId, delta){
+ const input = document.querySelector(inputId);
+ if(!input) return;
+ const next = Math.max(0, Number(input.value || 0) + delta);
+ input.value = next;
+ queueScoreSave(m);
+}
+function updateReadyButtons(m){
+ const readyBtn = document.querySelector('#ready');
+ const unreadyBtn = document.querySelector('#unready');
+ const finalBtn = document.querySelector('#final');
+ const undoFinalBtn = document.querySelector('#undoFinal');
+ const isReady = m.status === 'ready' || state?.fields?.[fieldId]?.ready === true;
+ const isFinalized = m.status === 'final' || m.status === 'locked';
+ const isStarted = m.status === 'in_progress' || isFinalized;
+ if(readyBtn) readyBtn.style.display = isReady || isStarted ? 'none' : 'inline-flex';
+ if(unreadyBtn) unreadyBtn.style.display = isReady && !isStarted ? 'inline-flex' : 'none';
+ if(finalBtn) finalBtn.style.display = isFinalized ? 'none' : 'inline-flex';
+ if(undoFinalBtn) undoFinalBtn.style.display = isFinalized ? 'inline-flex' : 'none';
+}
+function updateExisting(m){
+ const status = document.querySelector('#matchStatus');
+ if(status){ status.className = `status-${m.status}`; status.textContent = fmtStatus(m.status); }
+ updateReadyButtons(m);
+ const a = document.querySelector('#a');
+ const b = document.querySelector('#b');
+ if(document.activeElement !== a && a && Number(a.value || 0) !== Number(m.scoreA ?? 0)) a.value = m.scoreA ?? 0;
+ if(document.activeElement !== b && b && Number(b.value || 0) !== Number(m.scoreB ?? 0)) b.value = m.scoreB ?? 0;
+ if(!saving) setSaveState('Aggiornamento automatico attivo');
+ updateTimer();
+}
+function isBasket(m){ return String(m?.sport || '').toLowerCase().includes('basket'); }
+function positiveScoreControls(m, side, inputId){
+ const extra = isBasket(m) ? `<button class="btn ok score-btn" data-target="${inputId}" data-delta="2">+2</button><button class="btn ok score-btn" data-target="${inputId}" data-delta="3">+3</button>` : '';
+ return `<div class="score-tools score-tools-positive" data-side="${side}"><button class="btn ok score-btn" data-target="${inputId}" data-delta="1">+1</button>${extra}</div>`;
+}
+function negativeScoreControls(side, inputId){
+ return `<div class="score-tools score-tools-negative" data-side="${side}"><button class="btn bad score-btn" data-target="${inputId}" data-delta="-1">-1</button></div>`;
+}
+function timerHtml(){
+ const t = state?.tournament || {};
+ const phase = tournamentPhase(t);
+ return `<div class="card center field-timer ${phase === 'break' ? 'phase-break' : 'phase-game'}"><h2>Cronometro</h2><div class="big" id="fieldClock">${fmtTime(timerRemaining(t))}</div><div class="secondary-clock" id="fieldSecondaryClock">${secondaryTimerLabel(t)}</div><p class="muted" id="fieldPhase">${phaseLabel(phase)}</p></div>`;
+}
+function serviceHeader(m){
+ return `<div class="card field-service-header"><div><div class="field-kicker">Campo ${fieldId}</div><h1>${m._isPlayoff ? m.slot : `Turno ${m.slot}`}</h1><p class="muted">${m.sport} · ${teamName(state.teams,m.teamA)} vs ${teamName(state.teams,m.teamB)}</p><p>Stato: <b id="matchStatus" class="status-${m.status}">${fmtStatus(m.status)}</b></p></div><div class="field-ready-actions"><button id="ready" class="btn ok">Campo pronto</button><button id="unready" class="btn bad" style="display:none">Annulla pronto</button></div></div>`;
+}
+function updateTimer(){
+ const t = state?.tournament || {};
+ const clock = document.querySelector('#fieldClock');
+ const secondary = document.querySelector('#fieldSecondaryClock');
+ const phase = document.querySelector('#fieldPhase');
+ if(clock) clock.textContent = fmtTime(timerRemaining(t));
+ if(secondary) secondary.textContent = secondaryTimerLabel(t);
+ if(phase) phase.textContent = phaseLabel(tournamentPhase(t));
+ const box = document.querySelector('.field-timer');
+ if(box){ const p = tournamentPhase(t); box.classList.toggle('phase-break', p === 'break'); box.classList.toggle('phase-game', p !== 'break'); }
+}
+setInterval(updateTimer, 1000);
+function draw(){
+ const m = currentMatch();
+ if(!m){ renderedMatchId = null; document.querySelector('#app').innerHTML = `<div class="card danger"><h2>Nessuna partita per questo campo nel turno corrente</h2><p>Controlla il parametro URL: <code>?id=${fieldId}</code>.</p></div>`; return; }
+ if(renderedMatchId === m.id){ updateExisting(m); return; }
+ renderedMatchId = m.id;
+ document.querySelector('#app').innerHTML = `<div class="field-service-layout">${serviceHeader(m)}<div class="card center field-score-card"><h2>Risultato live</h2><div class="scoreboard field-scoreboard"><div class="team-score"><h3>${teamName(state.teams,m.teamA)}</h3>${positiveScoreControls(m,'A','#a')}<input id="a" class="score-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${m.scoreA ?? 0}">${negativeScoreControls('A','#a')}</div><div class="score-separator">-</div><div class="team-score"><h3>${teamName(state.teams,m.teamB)}</h3>${positiveScoreControls(m,'B','#b')}<input id="b" class="score-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${m.scoreB ?? 0}">${negativeScoreControls('B','#b')}</div></div><p id="saveState" class="muted">Aggiornamento automatico attivo</p><div class="row field-final-actions"><button id="final" class="btn warn">Finalizza</button><button id="undoFinal" class="btn bad" style="display:none">Annulla finalizzazione</button></div></div>${timerHtml()}</div>`;
+ document.querySelector('#ready').onclick = () => setReady(m);
+ document.querySelector('#unready').onclick = () => unsetReady(m);
+ updateReadyButtons(m);
+ document.querySelector('#a').addEventListener('input', () => queueScoreSave(m));
+ document.querySelector('#b').addEventListener('input', () => queueScoreSave(m));
+ document.querySelectorAll('.score-tools button').forEach(btn => btn.onclick = () => changeScore(m, btn.dataset.target, Number(btn.dataset.delta || 0)));
+ document.querySelector('#final').onclick = () => final(m);
+ document.querySelector('#undoFinal').onclick = () => undoFinal(m);
+}
+listen('/', v => {state = v || {}; draw();});
+</script></body></html>

@@ -1,0 +1,100 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, requireAdmin, listen, patch, write, asArray, fmtTime, timerRemaining, teamName, fmtStatus, DEFAULT_SCORING_RULES, scoringRules, tournamentPhase, phaseLabel, effectiveGameDuration, effectiveBreakDuration, secondaryTimerLabel, slotStartLabel} from './assets/js/app.js';
+renderTop('Admin regia','Console live: cronometri, turni e feedback dai campi');
+if(!requireAdmin()) throw new Error('Area admin bloccata');
+document.querySelector('.brand').insertAdjacentHTML('beforeend', '<div class="row admin-tools"><a class="btn warn" href="admin.html">Regia</a><a class="btn primary" href="admin-setup.html">Setup</a><a class="btn" href="admin-import.html">Import</a><a class="btn" href="display.html">Display</a><a class="btn primary" href="admin-playoff.html">Configura playoff</a><button id="adminLogout" class="btn bad" type="button">Esci</button></div>');
+document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href='index.html'; });
+let state = {}, tick, autoBusy = false, lastAutoKey = '';
+function fieldsReady(){ const fields = asArray(state.fields); return {ready: fields.filter(f=>f.ready).length, total: fields.length, fields}; }
+function currentSlot(){ return state?.tournament?.currentSlot || 1; }
+function allSlots(){ return [...new Set(asArray(state.matches).map(m=>Number(m.slot)).filter(Boolean))].sort((a,b)=>a-b); }
+async function setSlot(slot){
+ const n=Number(slot); if(!n) return;
+ await patch('tournament', {currentSlot:n, phase:'waiting', timerRunning:false, timerStart:null, timerDuration:effectiveGameDuration(state.tournament)});
+ for(const f of asArray(state.fields)) await patch(`fields/${f.id}`, {ready:false,status:'waiting',currentMatch:null});
+}
+function matchesForSlot(slot=currentSlot()){ return asArray(state.matches).filter(m=>m.slot===slot).sort((a,b)=>String(a.field).localeCompare(String(b.field))); }
+async function startTurn(){
+ const t = state.tournament || {}; const slot=currentSlot(); const gameDuration = effectiveGameDuration(t);
+ await patch('tournament', {phase:'game', timerRunning:true, timerStart:Date.now(), timerDuration:gameDuration});
+ for(const m of matchesForSlot(slot).filter(m=>m.status==='ready'||m.status==='scheduled')) await patch(`matches/${m.id}`, {status:'in_progress'});
+ for(const f of asArray(state.fields)) await patch(`fields/${f.id}`, {status:'playing'});
+}
+async function startBreak(){
+ const t = state.tournament || {}; const slot=currentSlot(); const breakDuration = effectiveBreakDuration(t);
+ for(const m of matchesForSlot(slot).filter(m=>m.status==='in_progress')) await patch(`matches/${m.id}`, {status:'final'});
+ for(const f of asArray(state.fields)) await patch(`fields/${f.id}`, {status:'break'});
+ await patch('tournament', {phase:'break', timerRunning:true, timerStart:Date.now(), timerDuration:breakDuration});
+}
+async function nextSlot(auto=false){
+ const next=currentSlot()+1;
+ const hasNext = asArray(state.matches).some(m=>m.slot===next);
+ if(!hasNext){ await patch('tournament', {phase:'finished', timerRunning:false, timerStart:null}); return; }
+ await patch('tournament', {currentSlot:next, phase:'waiting', timerRunning:false, timerStart:null, timerDuration:effectiveGameDuration(state.tournament)});
+ for(const f of asArray(state.fields)) await patch(`fields/${f.id}`, {ready:false,status:'waiting',currentMatch:null});
+}
+async function stopTimer(){ const t=state.tournament||{}; await patch('tournament', {timerRunning:false, phase:'paused', previousPhase:tournamentPhase(t), timerDuration:timerRemaining(t)}); }
+async function resumeTimer(){
+ const t=state.tournament||{}; const rem=timerRemaining(t) || t.timerDuration || effectiveGameDuration(t);
+ await patch('tournament', {timerRunning:true,timerStart:Date.now(),timerDuration:rem,phase:t.previousPhase || (t.phase==='paused'?'game':t.phase)});
+}
+async function forceBreak(){ await startBreak(); }
+async function resetReady(){ for(const f of asArray(state.fields)) await patch(`fields/${f.id}`, {ready:false,status:'waiting'}); }
+function val(id){ return Number(document.querySelector(id).value); }
+async function saveTiming(){
+ const gameMin = val('#gameMinutes'), gameSec = val('#gameSeconds'), breakMin = val('#breakMinutes'), breakSec = val('#breakSeconds');
+ await patch('tournament', {
+   gameDuration: Math.max(1, gameMin*60 + gameSec),
+   breakDuration: Math.max(0, breakMin*60 + breakSec),
+   startTime: document.querySelector('#startTime').value || '14:00',
+   autoStartWhenAllReady: document.querySelector('#autoStart').checked
+ });
+}
+async function saveRules(){
+ const rules = structuredClone(scoringRules(state.scoringRules));
+ rules.draw.each = val('#drawEach');
+ for(const sport of Object.keys(rules.sports)){
+   const rows = rules.sports[sport].margins;
+   rows[0].maxDiff = val(`#${sport}_mb_max`); rows[0].winner = val(`#${sport}_mb_w`); rows[0].loser = val(`#${sport}_mb_l`);
+   rows[1].maxDiff = val(`#${sport}_mm_max`); rows[1].winner = val(`#${sport}_mm_w`); rows[1].loser = val(`#${sport}_mm_l`);
+   rows[2].winner = val(`#${sport}_ma_w`); rows[2].loser = val(`#${sport}_ma_l`); rows[2].maxDiff = null;
+ }
+ await write('scoringRules', rules);
+}
+async function resetRules(){ await write('scoringRules', DEFAULT_SCORING_RULES); }
+function timingEditor(){
+ const t=state.tournament||{}; const gd=effectiveGameDuration(t), bd=effectiveBreakDuration(t);
+ return `<div class="card"><h2>Tempi torneo</h2><p class="muted">Il gioco parte quando tutti i campi sono pronti. A fine gioco parte la pausa. A fine pausa si passa al turno successivo e si torna in attesa campi.</p>
+ <div class="formline"><label>Orario inizio torneo</label><input id="startTime" type="time" value="${t.startTime || '14:00'}"></div>
+ <div class="formline"><label>Tempo di gioco</label><input id="gameMinutes" type="number" min="0" value="${Math.floor(gd/60)}"><span>min</span><input id="gameSeconds" type="number" min="0" max="59" value="${gd%60}"><span>sec</span></div>
+ <div class="formline"><label>Tempo pausa</label><input id="breakMinutes" type="number" min="0" value="${Math.floor(bd/60)}"><span>min</span><input id="breakSeconds" type="number" min="0" max="59" value="${bd%60}"><span>sec</span></div>
+ <div class="formline"><label><input id="autoStart" type="checkbox" ${t.autoStartWhenAllReady!==false?'checked':''}> Avvia automaticamente il gioco quando tutti i campi sono pronti</label></div>
+ <button id="saveTiming" class="btn primary">Salva tempi</button></div>`;
+}
+function ruleEditor(){
+ const rules = scoringRules(state.scoringRules);
+ const sports = Object.entries(rules.sports || {}).filter(([key]) => key !== 'frisbee');
+ return `<div class="card"><h2>Regole classifica</h2><p class="muted">Modifica solo se il regolamento cambia. I punti classifica vengono ricalcolati dai risultati: non sono salvati manualmente.</p><div class="formline"><label>Pareggio: punti per squadra</label><input id="drawEach" type="number" min="0" value="${rules.draw?.each ?? 3}"></div>${sports.map(([sport,rule])=>`<div class="rulebox"><h3>${rule.label || sport}</h3><table><thead><tr><th>Margine</th><th class="num">Diff. max</th><th class="num">Vincente</th><th class="num">Perdente</th></tr></thead><tbody>${rule.margins.map((m,i)=>`<tr><td>${m.code}</td><td class="num">${m.maxDiff===null?'oltre':`<input id="${sport}_${m.code.toLowerCase()}_max" type="number" min="0" value="${m.maxDiff}">`}</td><td class="num"><input id="${sport}_${m.code.toLowerCase()}_w" type="number" min="0" value="${m.winner}"></td><td class="num"><input id="${sport}_${m.code.toLowerCase()}_l" type="number" min="0" value="${m.loser}"></td></tr>`).join('')}</tbody></table></div>`).join('')}<div class="row"><button id="saveRules" class="btn primary">Salva regole</button><button id="resetRules" class="btn bad">Ripristina default regolamento</button></div></div>`;
+}
+async function autoController(){
+ if(autoBusy) return;
+ const t=state.tournament||{}, phase=tournamentPhase(t), rem=timerRemaining(t), ready=fieldsReady();
+ const key=`${phase}-${currentSlot()}-${t.timerStart}-${ready.ready}-${ready.total}`;
+ if(key===lastAutoKey) return;
+ if(phase==='game' && t.timerRunning && rem<=0){ autoBusy=true; lastAutoKey=key; await startBreak(); autoBusy=false; return; }
+ if(phase==='break' && t.timerRunning && rem<=0){ autoBusy=true; lastAutoKey=key; await nextSlot(true); autoBusy=false; return; }
+ if((phase==='waiting' || phase==='ready') && t.autoStartWhenAllReady!==false && ready.total>0 && ready.ready===ready.total){ autoBusy=true; lastAutoKey=key; await startTurn(); autoBusy=false; }
+}
+function draw(){
+ const tr = fieldsReady(); const t = state.tournament || {}; const rem = timerRemaining(t); const cur=currentSlot(); const phase=tournamentPhase(t);
+ const matches = matchesForSlot(cur);
+ const slots = allSlots();
+ document.querySelector('#app').innerHTML = `<div class="grid"><div class="card center"><div class="muted">${phaseLabel(phase).toUpperCase()}</div><h2>Turno ${cur} · ${slotStartLabel(t, cur)}</h2><div class="big" id="clock">${fmtTime(rem)}</div><div class="secondary-clock" id="secondaryClock">${secondaryTimerLabel(t)}</div><p>${tr.ready}/${tr.total} campi pronti</p><div class="row" style="justify-content:center"><button id="start" class="btn ok" ${phase==='game' || tr.ready<tr.total?'disabled':''}>Avvia gioco</button><button id="forceBreak" class="btn warn" ${phase!=='game'?'disabled':''}>Forza pausa</button><button id="stop" class="btn warn">Stop</button><button id="resume" class="btn ok" ${phase!=='paused'?'disabled':''}>Riprendi</button><button id="next" class="btn primary">Turno successivo</button><button id="reset" class="btn bad">Reset pronti</button></div></div><div class="card"><h2>Cambio turno manuale</h2><p class="muted">Usalo solo per recuperare errori o saltare un turno. Reset campi e cronometro in attesa.</p><div class="formline"><label>Turno</label><select id="slotSelect">${slots.map(s=>`<option value="${s}" ${s===cur?'selected':''}>Turno ${s} · ${slotStartLabel(t,s)}</option>`).join('')}</select><button id="setSlot" class="btn primary">Vai al turno</button></div><hr style="border-color:var(--line);margin:16px 0"><h2>Feedback campi</h2>${tr.fields.map(f=>`<p class="row spaced"><a class="fieldlink" href="campo.html?id=${f.id}" target="_blank"><b>${f.id}</b></a><span class="pill ${f.ready?'ok':'warn'}">${f.ready?'pronto':'non pronto'}</span></p>`).join('')}</div></div><br><div class="card"><h2>Partite turno corrente</h2><table><thead><tr><th>Campo</th><th>Partita</th><th class="num">Risultato</th><th>Stato</th></tr></thead><tbody>${matches.map(m=>`<tr><td><a href="campo.html?id=${m.field}" target="_blank">${m.field}</a></td><td>${teamName(state.teams,m.teamA)} - ${teamName(state.teams,m.teamB)}</td><td class="num"><b>${m.scoreA??0}-${m.scoreB??0}</b></td><td class="status-${m.status}">${fmtStatus(m.status)}</td></tr>`).join('')}</tbody></table></div>`;
+ document.querySelector('#start').onclick=startTurn; document.querySelector('#forceBreak').onclick=forceBreak; document.querySelector('#stop').onclick=stopTimer; document.querySelector('#resume').onclick=resumeTimer; document.querySelector('#next').onclick=nextSlot; document.querySelector('#reset').onclick=resetReady;
+ document.querySelector('#setSlot').onclick=()=>setSlot(document.querySelector('#slotSelect').value);
+ clearInterval(tick); tick=setInterval(()=>{ const c=document.querySelector('#clock'); if(c)c.textContent=fmtTime(timerRemaining(state.tournament)); const sc=document.querySelector('#secondaryClock'); if(sc)sc.textContent=secondaryTimerLabel(state.tournament); autoController(); },500);
+ autoController();
+}
+listen('/', v => {state=v||{}; draw();});
+</script></body></html>

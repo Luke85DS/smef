@@ -1,0 +1,480 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Setup Torneo</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, requireAdmin, read, write, patch, teamName, DEFAULT_SCORING_RULES, scoringRules, calculateMatchPoints, computeStandings, effectiveGameDuration, effectiveBreakDuration, fmtTime, slotStartLabel, asArray} from './assets/js/app.js';
+renderTop('Setup torneo','Impostazioni iniziali, import squadre/calendario e regole classifica');
+if(!requireAdmin()) throw new Error('Area admin bloccata');
+document.querySelector('.brand').insertAdjacentHTML('beforeend', '<div class="row admin-tools"><a class="btn warn" href="admin.html">Regia</a><a class="btn primary" href="admin-setup.html">Setup</a><a class="btn" href="admin-import.html">Import</a><button id="adminLogout" class="btn bad" type="button">Esci</button></div>');
+document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href='index.html'; });
+let parsed = {teams:null, matches:null, fields:null, errors:[], warnings:[]};
+let existing = {};
+const appEl = document.querySelector('#app');
+
+function norm(s){return String(s||'').trim();}
+function key(s){return norm(s).toLowerCase().replace(/[àá]/g,'a').replace(/[èé]/g,'e').replace(/[ìí]/g,'i').replace(/[òó]/g,'o').replace(/[ùú]/g,'u').replace(/[^a-z0-9]/g,'');}
+function slug(s, fallback='id'){
+  const v = norm(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  return v || fallback;
+}
+function splitCSVLine(line, sep){
+  const out=[]; let cur='', q=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i], nx=line[i+1];
+    if(ch==='"' && q && nx==='"'){cur+='"'; i++; continue;}
+    if(ch==='"'){q=!q; continue;}
+    if(ch===sep && !q){out.push(cur); cur=''; continue;}
+    cur+=ch;
+  }
+  out.push(cur); return out.map(x=>x.trim());
+}
+function parseCSV(text){
+  const raw = text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l=>l.trim().length);
+  if(raw.length<2) throw new Error('CSV vuoto o senza righe dati');
+  const sep = (raw[0].split(';').length > raw[0].split(',').length) ? ';' : ',';
+  const headers = splitCSVLine(raw[0], sep).map(key);
+  return raw.slice(1).map(line=>{
+    const vals=splitCSVLine(line, sep), obj={};
+    headers.forEach((h,i)=>obj[h]=vals[i] ?? '');
+    return obj;
+  });
+}
+function pick(row, names){ for(const n of names){const k=key(n); if(row[k]!==undefined && norm(row[k])!=='') return norm(row[k]);} return ''; }
+function normalizeSport(s){
+  const v=key(s);
+  if(v.includes('basket')) return 'basket';
+  if(v.includes('volley')||v.includes('pallavolo')) return 'volley';
+  if(v.includes('calcio')||v.includes('football')||v.includes('futsal')) return 'calcio';
+  if(v.includes('frisbee')||v.includes('ultimate')) return 'ultimate';
+  return norm(s).toLowerCase();
+}
+function parseTeamsRows(rows){
+  const teams={}, warnings=[], errors=[];
+  rows.forEach((r,i)=>{
+    const name = pick(r,['name','nome','squadra','team','teamname','nome squadra']);
+    const idRaw = pick(r,['id','teamid','codice','codice squadra']);
+    if(!name){warnings.push(`Riga squadre ${i+2}: nome mancante, ignorata`); return;}
+    const id = idRaw ? slug(idRaw,'team') : slug(name,'team');
+    if(teams[id]) warnings.push(`ID squadra duplicato "${id}": tengo l'ultima occorrenza`);
+    teams[id] = {name};
+  });
+  if(!Object.keys(teams).length) errors.push('Nessuna squadra valida trovata');
+  return {teams,warnings,errors};
+}
+function nameToTeamId(teams){
+  const map={};
+  Object.entries(teams||{}).forEach(([id,t])=>{map[key(t.name)]=id; map[key(id)]=id;});
+  return map;
+}
+function parseMatchesRows(rows, teams){
+  const matches={}, fields={}, warnings=[], errors=[], teamMap=nameToTeamId(teams||{});
+  rows.forEach((r,i)=>{
+    const n=i+2;
+    const slot = Number(pick(r,['slot','turno','round','numero turno','n turno']));
+    const sport = normalizeSport(pick(r,['sport','disciplina','gioco']));
+    const field = slug(pick(r,['field','campo','campoid','campo id']),'campo');
+    const aRaw = pick(r,['teamA','squadraA','casa','team1','squadra1','a']);
+    const bRaw = pick(r,['teamB','squadraB','ospite','team2','squadra2','b']);
+    const teamA = teamMap[key(aRaw)] || slug(aRaw,'team');
+    const teamB = teamMap[key(bRaw)] || slug(bRaw,'team');
+    if(!slot) errors.push(`Riga calendario ${n}: turno mancante o non numerico`);
+    if(!sport) errors.push(`Riga calendario ${n}: sport mancante`);
+    if(!field) errors.push(`Riga calendario ${n}: campo mancante`);
+    if(!aRaw || !bRaw) errors.push(`Riga calendario ${n}: squadra A/B mancante`);
+    if(aRaw && teams && !teams[teamA]) warnings.push(`Riga calendario ${n}: squadra A "${aRaw}" non trovata tra le squadre importate/esistenti`);
+    if(bRaw && teams && !teams[teamB]) warnings.push(`Riga calendario ${n}: squadra B "${bRaw}" non trovata tra le squadre importate/esistenti`);
+    if(!slot || !sport || !field || !aRaw || !bRaw) return;
+    const id = slug(pick(r,['id','matchid','partita','codice']) || `m-${String(slot).padStart(2,'0')}-${field}-${teamA}-${teamB}`, 'match');
+    matches[id] = {slot, sport, field, teamA, teamB, scoreA:Number(pick(r,['scoreA','puntiA','risultatoA'])||0), scoreB:Number(pick(r,['scoreB','puntiB','risultatoB'])||0), status: pick(r,['status','stato']) || 'scheduled'};
+    fields[field] = {ready:false,status:'waiting',currentMatch:null};
+  });
+  if(!Object.keys(matches).length) errors.push('Nessuna partita valida trovata');
+  return {matches,fields,warnings,errors};
+}
+function parseJSON(text){
+  const obj=JSON.parse(text);
+  const out={warnings:[],errors:[]};
+  if(obj.teams) out.teams=obj.teams;
+  if(obj.matches) out.matches=obj.matches;
+  if(obj.fields) out.fields=obj.fields;
+  if(!out.teams && !out.matches) out.errors.push('JSON valido, ma non contiene teams o matches');
+  return out;
+}
+async function loadExisting(){ existing = await read('/') || {}; }
+function expectedImportWarnings(){
+  const warnings = [];
+  if(!parsed.matches) return warnings;
+  const m = tournamentMetrics();
+  const matchesN = Object.keys(parsed.matches || {}).length;
+  const slots = Math.max(0, ...Object.values(parsed.matches || {}).map(x => Number(x.slot) || 0));
+  if(m.expectedMatches && matchesN !== m.expectedMatches) warnings.push(`Calendario: ${matchesN} partite importate, ma il setup ne prevede ${m.expectedMatches}`);
+  if(m.expectedTurns && slots !== m.expectedTurns) warnings.push(`Calendario: ${slots} turni importati, ma il setup ne prevede ${m.expectedTurns}`);
+  const bySlot = {};
+  Object.values(parsed.matches || {}).forEach(match => { const slot = Number(match.slot)||0; if(slot) bySlot[slot] = (bySlot[slot] || 0) + 1; });
+  Object.entries(bySlot).forEach(([slot,n]) => { if(n > m.fieldsPerTurn) warnings.push(`Turno ${slot}: ${n} partite, oltre il limite impostato di ${m.fieldsPerTurn} campi/partite contemporanee`); });
+  return warnings;
+}
+function preview(){
+  const extraWarnings = expectedImportWarnings();
+  parsed.warnings = [...new Set([...(parsed.warnings || []), ...extraWarnings])];
+  const teamsN = parsed.teams ? Object.keys(parsed.teams).length : 0;
+  const matchesN = parsed.matches ? Object.keys(parsed.matches).length : 0;
+  const fieldsN = parsed.fields ? Object.keys(parsed.fields).length : 0;
+  const sampleTeams = Object.entries(parsed.teams||{}).slice(0,8).map(([id,t])=>`<tr><td>${id}</td><td>${t.name}</td></tr>`).join('');
+  const sampleMatches = Object.entries(parsed.matches||{}).slice(0,12).map(([id,m])=>`<tr><td>${id}</td><td>${m.slot}</td><td>${m.field}</td><td>${m.sport}</td><td>${teamName(parsed.teams||existing.teams,m.teamA)}</td><td>${teamName(parsed.teams||existing.teams,m.teamB)}</td></tr>`).join('');
+  document.querySelector('#preview').innerHTML = `<div class="grid"><div class="card"><h2>Anteprima</h2><p><b>${teamsN}</b> squadre · <b>${matchesN}</b> partite · <b>${fieldsN}</b> campi</p>${parsed.errors.length?`<div class="notice danger"><b>Errori</b><br>${parsed.errors.join('<br>')}</div>`:''}${parsed.warnings.length?`<div class="notice"><b>Avvisi</b><br>${parsed.warnings.slice(0,12).join('<br>')}${parsed.warnings.length>12?'<br>...':''}</div>`:''}</div></div>${teamsN?`<br><div class="card"><h2>Prime squadre</h2><table><thead><tr><th>ID</th><th>Nome</th></tr></thead><tbody>${sampleTeams}</tbody></table></div>`:''}${matchesN?`<br><div class="card"><h2>Prime partite</h2><table><thead><tr><th>ID</th><th>Turno</th><th>Campo</th><th>Sport</th><th>Squadra A</th><th>Squadra B</th></tr></thead><tbody>${sampleMatches}</tbody></table></div>`:''}`;
+  document.querySelector('#importBtn').disabled = !!parsed.errors.length || (!parsed.teams && !parsed.matches);
+}
+async function handleFile(kind){
+  await loadExisting();
+  parsed={teams:null,matches:null,fields:null,errors:[],warnings:[]};
+  const file=document.querySelector('#file').files[0];
+  if(!file){parsed.errors.push('Seleziona un file'); preview(); return;}
+  const text=await file.text();
+  try{
+    if(file.name.toLowerCase().endsWith('.json')){
+      const out=parseJSON(text); Object.assign(parsed,out);
+    } else if(kind==='teams'){
+      const out=parseTeamsRows(parseCSV(text)); Object.assign(parsed,out);
+    } else if(kind==='matches'){
+      const out=parseMatchesRows(parseCSV(text), existing.teams); Object.assign(parsed,out);
+    } else {
+      const rows=parseCSV(text);
+      const teamOut=parseTeamsRows(rows);
+      if(!teamOut.errors.length && Object.keys(teamOut.teams).length){ Object.assign(parsed,teamOut); }
+      else { Object.assign(parsed,parseMatchesRows(rows, existing.teams)); }
+    }
+  } catch(e){ parsed.errors.push(e.message); }
+  preview();
+}
+async function doImport(){
+  const mode=document.querySelector('input[name="mode"]:checked').value;
+  if(parsed.errors.length) return;
+  if(!confirm(mode==='replace' ? 'Sovrascrivere squadre, calendario e campi interessati?' : 'Importare unendo ai dati esistenti?')) return;
+  if(mode==='replace'){
+    if(parsed.teams) await write('teams', parsed.teams);
+    if(parsed.matches) await write('matches', parsed.matches);
+    if(parsed.fields) await write('fields', parsed.fields);
+  } else {
+    if(parsed.teams) await patch('teams', parsed.teams);
+    if(parsed.matches) await patch('matches', parsed.matches);
+    if(parsed.fields) await patch('fields', parsed.fields);
+  }
+  await patch('tournament', {currentSlot:1, phase:'waiting', timerRunning:false, timerStart:null});
+  await loadExisting();
+  await saveComputedSchedule();
+  document.querySelector('#done').innerHTML='<div class="notice"><b>Import completato.</b> Controlla Calendario completo e Turni prima di usare il torneo.</div>';
+}
+
+function val(id){ return Number(document.querySelector(id).value); }
+function importedSlots(){ return Math.max(0, ...Object.values(existing.matches||{}).map(m=>Number(m.slot)||0)); }
+function importedMatches(){ return Object.keys(existing.matches || {}).length; }
+function inferredFieldsPerTurn(){
+  const matches = Object.values(existing.matches || {});
+  const bySlot = {};
+  matches.forEach(m => { const slot = Number(m.slot)||0; if(slot) bySlot[slot] = (bySlot[slot] || 0) + 1; });
+  const maxFromCalendar = Math.max(0, ...Object.values(bySlot));
+  const fieldsCount = Object.keys(existing.fields || {}).length;
+  return Number(existing.tournament?.fieldsPerTurn || maxFromCalendar || fieldsCount || 1);
+}
+function expectedTournamentMatches(teamCount, matchesPerTeam=8){
+  const n = Math.max(0, Number(teamCount || 0));
+  const mpt = Math.max(0, Number(matchesPerTeam || 8));
+  return Math.ceil((n * mpt) / 2);
+}
+function tournamentMetrics(){
+  const t = existing.tournament || {};
+  const teamCount = Math.max(0, Number(t.teamCount || Object.keys(existing.teams || {}).length || 0));
+  const fieldsPerTurn = Math.max(1, Number(t.fieldsPerTurn || inferredFieldsPerTurn() || 1));
+  const importedMatchCount = importedMatches();
+  const importedSlotCount = importedSlots();
+  const matchesPerTeam = Math.max(1, Number(t.matchesPerTeam || 8));
+  const matchesPerSport = Math.max(1, Number(t.matchesPerSport || 2));
+  const sportsCount = Math.max(1, Number(t.sportsCount || 4));
+  const expectedMatches = expectedTournamentMatches(teamCount, matchesPerTeam);
+  const expectedTurns = expectedMatches ? Math.ceil(expectedMatches / fieldsPerTurn) : 0;
+  const game = effectiveGameDuration(t);
+  const brk = effectiveBreakDuration(t);
+  const start = t.startTime || '14:00';
+  const [h,m]=String(start).split(':').map(Number);
+  const validStart = !Number.isNaN(h) && !Number.isNaN(m);
+  const totalSecIncludingFinalBreak = expectedTurns * (game + brk);
+  const totalSecWithoutFinalBreak = expectedTurns ? expectedTurns * game + Math.max(0,expectedTurns-1) * brk : 0;
+  function addSeconds(sec){
+    if(!validStart) return 'orario non valido';
+    const totalMin = h*60 + m + Math.floor(sec/60);
+    const hh=String(Math.floor(totalMin/60)%24).padStart(2,'0');
+    const mm=String(totalMin%60).padStart(2,'0');
+    return `${hh}:${mm}`;
+  }
+  return {teamCount, fieldsPerTurn, importedMatchCount, importedSlotCount, matchesPerTeam, matchesPerSport, sportsCount, expectedMatches, expectedTurns, totalMatches: expectedMatches, totalTurns: expectedTurns, game, brk, start, endIncludingFinalBreak:addSeconds(totalSecIncludingFinalBreak), endWithoutFinalBreak:addSeconds(totalSecWithoutFinalBreak)};
+}
+function calcEndLabel(){
+  const m = tournamentMetrics();
+  if(!m.totalTurns) return 'Inserisci numero squadre e partite contemporanee/campi attivi per calcolare la struttura attesa.';
+  return `${m.expectedMatches} partite attese · ${m.expectedTurns} turni attesi · fine stimata ${m.endIncludingFinalBreak} inclusa pausa finale`;
+}
+function scheduleRowsHtml(){
+  const m = tournamentMetrics();
+  if(!m.totalTurns) return '<p class="muted">Nessun turno calcolabile.</p>';
+  const t = existing.tournament || {};
+  const [h0,m0] = String(t.startTime || '14:00').split(':').map(Number);
+  if(Number.isNaN(h0) || Number.isNaN(m0)) return '<p class="muted">Orario inizio non valido.</p>';
+  function timeAfter(sec){
+    const totalMin = h0*60 + m0 + Math.floor(sec/60);
+    return `${String(Math.floor(totalMin/60)%24).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+  }
+  let rows = '';
+  for(let i=1;i<=m.totalTurns;i++){
+    const offset = (i-1) * (m.game + m.brk);
+    const gameStart = timeAfter(offset);
+    const gameEnd = timeAfter(offset + m.game);
+    const breakEnd = timeAfter(offset + m.game + m.brk);
+    const matchesInTurn = Math.min(m.fieldsPerTurn, Math.max(0, m.expectedMatches - (i-1)*m.fieldsPerTurn));
+    rows += `<tr><td>${i}</td><td>${gameStart}</td><td>${gameEnd}</td><td>${breakEnd}</td><td class="num">${matchesInTurn}</td></tr>`;
+  }
+  return `<table><thead><tr><th>Turno</th><th>Inizio gioco</th><th>Fine gioco</th><th>Fine pausa</th><th class="num">Partite</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+async function saveComputedSchedule(){
+  const m = tournamentMetrics();
+  await patch('tournament/scheduleSummary', {
+    teamCount: m.teamCount,
+    fieldsPerTurn: m.fieldsPerTurn,
+    matchesPerTeam: m.matchesPerTeam,
+    matchesPerSport: m.matchesPerSport,
+    sportsCount: m.sportsCount,
+    totalMatches: m.expectedMatches,
+    totalTurns: m.expectedTurns,
+    expectedMatches: m.expectedMatches,
+    expectedTurns: m.expectedTurns,
+    importedMatches: m.importedMatchCount,
+    importedSlots: m.importedSlotCount,
+    endTime: m.endIncludingFinalBreak,
+    endTimeWithoutFinalBreak: m.endWithoutFinalBreak,
+    includesFinalBreak: true,
+    source: 'expected_from_setup'
+  });
+}
+async function saveTeamCountLive(){
+  const input = document.querySelector('#teamCount');
+  const status = document.querySelector('#teamCountStatus');
+  const teamCount = Math.max(0, Number(input.value || 0));
+  input.value = teamCount;
+  status.textContent = 'salvataggio...';
+  existing.tournament = {...(existing.tournament || {}), teamCount};
+  await patch('tournament', { teamCount });
+  await saveComputedSchedule();
+  status.textContent = `salvato: ${teamCount}`;
+  renderSchedulePanelOnly();
+}
+async function saveFieldsPerTurnLive(){
+  const input = document.querySelector('#fieldsPerTurn');
+  const status = document.querySelector('#fieldsPerTurnStatus');
+  const fieldsPerTurn = Math.max(1, Number(input.value || 1));
+  input.value = fieldsPerTurn;
+  status.textContent = 'salvataggio...';
+  existing.tournament = {...(existing.tournament || {}), fieldsPerTurn};
+  await patch('tournament', { fieldsPerTurn });
+  await saveComputedSchedule();
+  status.textContent = `salvato: ${fieldsPerTurn}`;
+  renderSchedulePanelOnly();
+}
+async function saveTournamentSettings(){
+  const gameMin=val('#gameMinutes'), gameSec=val('#gameSeconds'), breakMin=val('#breakMinutes'), breakSec=val('#breakSeconds');
+  const payload = {
+    teamCount: val('#teamCount'),
+    fieldsPerTurn: Math.max(1, val('#fieldsPerTurn')),
+    matchesPerTeam: 8,
+    matchesPerSport: 2,
+    sportsCount: 4,
+    gameDuration: Math.max(1, gameMin*60 + gameSec),
+    breakDuration: Math.max(0, breakMin*60 + breakSec),
+    startTime: document.querySelector('#startTime').value || '14:00',
+    autoStartWhenAllReady: document.querySelector('#autoStart').checked
+  };
+  await patch('tournament', payload);
+  existing.tournament = {...(existing.tournament || {}), ...payload};
+  await saveComputedSchedule();
+  await loadExisting(); renderSetup();
+}
+async function saveRules(){
+  const rules = structuredClone(scoringRules(existing.scoringRules));
+  rules.draw.each = val('#drawEach');
+  for(const sport of Object.keys(rules.sports || {})){
+    if(sport === 'frisbee') continue;
+    const rows = rules.sports[sport].margins;
+    rows[0].maxDiff = val(`#${sport}_mb_max`); rows[0].winner = val(`#${sport}_mb_w`); rows[0].loser = val(`#${sport}_mb_l`);
+    rows[1].maxDiff = val(`#${sport}_mm_max`); rows[1].winner = val(`#${sport}_mm_w`); rows[1].loser = val(`#${sport}_mm_l`);
+    rows[2].winner = val(`#${sport}_ma_w`); rows[2].loser = val(`#${sport}_ma_l`); rows[2].maxDiff = null;
+  }
+  await write('scoringRules', rules);
+  await loadExisting(); renderSetup();
+}
+async function resetRules(){ await write('scoringRules', DEFAULT_SCORING_RULES); await loadExisting(); renderSetup(); }
+function schedulePanel(){
+  const m = tournamentMetrics();
+  const mismatch = (m.importedMatchCount && m.importedMatchCount !== m.expectedMatches) || (m.importedSlotCount && m.importedSlotCount !== m.expectedTurns);
+  return `<div class="card" id="schedulePanel"><h2>Struttura attesa per import calendario</h2><div class="kpi"><div><b>${m.expectedMatches}</b><span>partite attese</span></div><div><b>${m.expectedTurns}</b><span>turni attesi</span></div><div><b>${m.matchesPerTeam}</b><span>partite per squadra</span></div><div><b>${m.endIncludingFinalBreak}</b><span>fine con pausa finale</span></div><div><b>${m.endWithoutFinalBreak}</b><span>fine senza pausa finale</span></div></div><p class="muted">Calcolo basato su: ogni squadra gioca 2 partite per sport su 4 sport, quindi 8 partite totali per squadra. Formula: squadre × 8 / 2. Serve per preparare e validare il calendario da importare, non dipende dal calendario già importato.</p>${m.importedMatchCount ? `<div class="notice ${mismatch?'danger':''}"><b>Calendario importato:</b> ${m.importedMatchCount} partite · ${m.importedSlotCount} turni. ${mismatch?'Non coincide con la struttura attesa.':'Coincide con la struttura attesa.'}</div>` : ''}${scheduleRowsHtml()}</div>`;
+}
+function renderSchedulePanelOnly(){
+  const el = document.querySelector('#schedulePanel');
+  if(el) el.outerHTML = schedulePanel();
+}
+function timingEditor(){
+  const t=existing.tournament||{}; const gd=effectiveGameDuration(t), bd=effectiveBreakDuration(t);
+  const inferredTeams=Object.keys(existing.teams||{}).length;
+  const m = tournamentMetrics();
+  return `<div class="card"><h2>Impostazioni torneo</h2><p class="muted">Queste vanno impostate prima dell'evento. Durante il torneo usa solo la pagina Admin regia.</p>
+  <div class="formline"><label>Numero squadre partecipanti</label><input id="teamCount" type="number" min="0" value="${t.teamCount || inferredTeams || 0}"><span class="muted">attuali in database: ${inferredTeams}</span><span id="teamCountStatus" class="muted">salvato</span></div>
+  <div class="formline"><label>Formula partite</label><span class="muted">2 partite per sport × 4 sport = 8 partite per squadra</span></div>
+  <div class="formline"><label>Partite contemporanee / campi attivi</label><input id="fieldsPerTurn" type="number" min="1" value="${m.fieldsPerTurn}"><span class="muted">serve per calcolare turni e file calendario atteso</span><span id="fieldsPerTurnStatus" class="muted">salvato</span></div>
+  <div class="formline"><label>Orario inizio torneo</label><input id="startTime" type="time" value="${t.startTime || '14:00'}"></div>
+  <div class="formline"><label>Tempo di gioco</label><input id="gameMinutes" type="number" min="0" value="${Math.floor(gd/60)}"><span>min</span><input id="gameSeconds" type="number" min="0" max="59" value="${gd%60}"><span>sec</span></div>
+  <div class="formline"><label>Tempo pausa/riposo</label><input id="breakMinutes" type="number" min="0" value="${Math.floor(bd/60)}"><span>min</span><input id="breakSeconds" type="number" min="0" max="59" value="${bd%60}"><span>sec</span></div>
+  <div class="formline"><label><input id="autoStart" type="checkbox" ${t.autoStartWhenAllReady!==false?'checked':''}> Avvio automatico quando tutti i campi sono pronti</label></div>
+  <div class="notice"><b>Calcolo orario:</b> ${calcEndLabel()}</div>
+  <button id="saveTiming" class="btn primary">Salva impostazioni torneo</button></div><br>${schedulePanel()}`;
+}
+function ruleEditor(){
+  const rules = scoringRules(existing.scoringRules);
+  const sports = Object.entries(rules.sports || {}).filter(([key]) => key !== 'frisbee');
+  return `<div class="card"><h2>Margini e punti classifica</h2><p class="muted">Default regolamento: pareggio 3/3, vittoria 4/2 · 5/1 · 6/0 in base al margine.</p><div class="formline"><label>Pareggio: punti per squadra</label><input id="drawEach" type="number" min="0" value="${rules.draw?.each ?? 3}"></div>${sports.map(([sport,rule])=>`<div class="rulebox"><h3>${rule.label || sport}</h3><table><thead><tr><th>Margine</th><th class="num">Diff. max</th><th class="num">Vincente</th><th class="num">Perdente</th></tr></thead><tbody>${rule.margins.map((m,i)=>`<tr><td>${m.code}</td><td class="num">${m.maxDiff===null?'oltre':`<input id="${sport}_${m.code.toLowerCase()}_max" type="number" min="0" value="${m.maxDiff}">`}</td><td class="num"><input id="${sport}_${m.code.toLowerCase()}_w" type="number" min="0" value="${m.winner}"></td><td class="num"><input id="${sport}_${m.code.toLowerCase()}_l" type="number" min="0" value="${m.loser}"></td></tr>`).join('')}</tbody></table></div>`).join('')}<div class="row"><button id="saveRules" class="btn primary">Salva margini</button><button id="resetRules" class="btn bad">Ripristina default</button></div></div>`;
+}
+function importEditor(){
+  return `<div class="card"><h2>Import squadre e calendario</h2><p class="muted">Accetta CSV o JSON. Prima fa anteprima e validazione, poi scrive su Firebase. Il calendario viene confrontato con la struttura attesa calcolata sopra.</p><div class="formline"><input id="file" type="file" accept=".csv,.json,text/csv,application/json"></div><div class="row"><button class="btn" id="parseTeams">Leggi come squadre</button><button class="btn" id="parseMatches">Leggi come calendario</button><button class="btn" id="parseAuto">Auto</button></div><hr style="border-color:var(--line);margin:16px 0"><div class="formline"><label><input type="radio" name="mode" value="merge" checked> Unisci ai dati esistenti</label><label><input type="radio" name="mode" value="replace"> Sostituisci sezioni importate</label></div><button id="importBtn" class="btn primary" disabled>Importa in Firebase</button><div id="done" style="margin-top:12px"></div></div><br><div class="card"><h2>Formato CSV squadre</h2><pre>id,nome\nteam01,Squadra 01\nteam02,Squadra 02</pre><h2>Formato CSV calendario</h2><pre>id,turno,sport,campo,squadraA,squadraB\nm001,1,calcio,calcio1,team01,team02\nm002,1,volley,volley1,Squadra 03,Squadra 04</pre><p class="muted">Puoi usare ID squadra oppure nome squadra. Campi e sport vengono normalizzati.</p></div><br><div id="preview"></div>`;
+}
+
+function csvEscape(value){
+  const s = value === null || value === undefined ? '' : String(value);
+  return /[";\n\r,]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+}
+function downloadCsv(filename, rows){
+  const csv = rows.map(row => row.map(csvEscape).join(';')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function todayStamp(){
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+}
+function exportCalendarCsv(){
+  const rows = [['id','turno','orario','campo','sport','squadra_a','squadra_b','punteggio_a','punteggio_b','stato','punti_classifica_a','punti_classifica_b','margine']];
+  const teams = existing.teams || {};
+  const rules = scoringRules(existing.scoringRules);
+  Object.entries(existing.matches || {})
+    .sort((a,b)=>(Number(a[1].slot)||0)-(Number(b[1].slot)||0) || String(a[1].field||'').localeCompare(String(b[1].field||'')))
+    .forEach(([id,m])=>{
+      const pts = calculateMatchPoints(m.sport, m.scoreA || 0, m.scoreB || 0, rules);
+      rows.push([id, m.slot || '', slotStartLabel(existing.tournament || {}, m.slot || 1), m.field || '', m.sport || '', teamName(teams,m.teamA), teamName(teams,m.teamB), Number(m.scoreA || 0), Number(m.scoreB || 0), m.status || '', pts.a, pts.b, pts.margin || '']);
+    });
+  downloadCsv(`calendario-risultati-${todayStamp()}.csv`, rows);
+}
+function exportStandingsCsv(){
+  const official = computeStandings(existing.teams || {}, existing.matches || {}, existing.scoringRules, 'official');
+  const rows = [['posizione','squadra','punti_ufficiali','proiezione_live','differenza_live','pg_ufficiali','pg_live','v','n','p','pf_live','ps_live','diff_live','pf_ufficiali','ps_ufficiali','diff_ufficiale']];
+  official.forEach((r,i)=>{
+    rows.push([i+1, r.name, r.official, r.live, r.delta, r.playedOfficial, r.playedLive, r.wins, r.draws, r.losses, r.gfLive, r.gaLive, r.gdLive, r.gfOfficial, r.gaOfficial, r.gdOfficial]);
+  });
+  downloadCsv(`classifica-${todayStamp()}.csv`, rows);
+}
+function exportPlayoffCsv(){
+  const roundNames = {r16:'Ottavi', qf:'Quarti', sf:'Semifinali', final:'Finale'};
+  const order = {r16:1, qf:2, sf:3, final:4};
+  const rows = [['id','fase','numero','squadra_a','squadra_b','sceglie_sport','sport','vincente','stato']];
+  Object.entries(existing.playoffs?.matches || {})
+    .sort((a,b)=>(order[a[1].round]||99)-(order[b[1].round]||99) || (Number(a[1].index)||0)-(Number(b[1].index)||0))
+    .forEach(([id,m])=>{
+      rows.push([id, roundNames[m.round] || m.round || '', m.index || '', teamName(existing.teams,m.teamA), teamName(existing.teams,m.teamB), teamName(existing.teams,m.chooser), m.sport || '', teamName(existing.teams,m.winner), m.status || '']);
+    });
+  downloadCsv(`bracket-playoff-${todayStamp()}.csv`, rows);
+}
+async function resetTournamentState(){
+  const phrase = 'RESET TORNEO';
+  const first = confirm('Reset torneo: azzera punteggi, stati partite, pronti campo, cronometri e bracket playoff. Squadre, calendario, impostazioni e margini restano salvati. Continuare?');
+  if(!first) return;
+  const typed = prompt(`Per confermare scrivi esattamente: ${phrase}`);
+  if(typed !== phrase){ alert('Reset annullato.'); return; }
+  const matches = {};
+  Object.entries(existing.matches || {}).forEach(([id,m])=>{
+    matches[id] = {...m, scoreA:0, scoreB:0, status:'scheduled'};
+  });
+  const fields = {};
+  Object.entries(existing.fields || {}).forEach(([id,f])=>{
+    fields[id] = {...f, ready:false, status:'waiting', currentMatch:null};
+  });
+  const t = existing.tournament || {};
+  await patch('/', {
+    matches,
+    fields,
+    playoffs: {matches:{}},
+    tournament: {
+      ...t,
+      currentSlot: 1,
+      phase: 'waiting',
+      timerRunning: false,
+      timerStart: null,
+      timerDuration: effectiveGameDuration(t),
+      pausedRemaining: null
+    }
+  });
+  await loadExisting();
+  await saveComputedSchedule().catch(() => {});
+  renderSetup();
+  alert('Reset completato.');
+}
+function maintenanceEditor(){
+  return `<div class="card"><h2>Reset ed esportazioni</h2><p class="muted">Operazioni da usare prima o dopo il torneo. Il reset non elimina squadre, calendario, impostazioni o margini: riporta solo lo stato gara a zero.</p><div class="row"><button id="resetTournament" class="btn bad">Reset torneo</button><button id="exportCalendar" class="btn">Esporta calendario + risultati CSV</button><button id="exportStandings" class="btn">Esporta classifica CSV</button><button id="exportPlayoff" class="btn">Esporta bracket playoff CSV</button></div></div>`;
+}
+
+function renderSetup(){
+  appEl.innerHTML = `<div class="grid">${timingEditor()}${ruleEditor()}</div><br>${importEditor()}<br>${maintenanceEditor()}`;
+  document.querySelector('#saveTiming').onclick=saveTournamentSettings;
+  const teamCountInput = document.querySelector('#teamCount');
+  let teamCountTimer = null;
+  teamCountInput.addEventListener('input', () => {
+    document.querySelector('#teamCountStatus').textContent = 'modificato';
+    clearTimeout(teamCountTimer);
+    teamCountTimer = setTimeout(() => saveTeamCountLive().catch(err => {
+      document.querySelector('#teamCountStatus').textContent = 'errore salvataggio';
+      console.error(err);
+    }), 350);
+  });
+  teamCountInput.addEventListener('change', () => saveTeamCountLive().catch(err => {
+    document.querySelector('#teamCountStatus').textContent = 'errore salvataggio';
+    console.error(err);
+  }));
+  const fieldsPerTurnInput = document.querySelector('#fieldsPerTurn');
+  let fieldsPerTurnTimer = null;
+  fieldsPerTurnInput.addEventListener('input', () => {
+    document.querySelector('#fieldsPerTurnStatus').textContent = 'modificato';
+    clearTimeout(fieldsPerTurnTimer);
+    fieldsPerTurnTimer = setTimeout(() => saveFieldsPerTurnLive().catch(err => {
+      document.querySelector('#fieldsPerTurnStatus').textContent = 'errore salvataggio';
+      console.error(err);
+    }), 350);
+  });
+  fieldsPerTurnInput.addEventListener('change', () => saveFieldsPerTurnLive().catch(err => {
+    document.querySelector('#fieldsPerTurnStatus').textContent = 'errore salvataggio';
+    console.error(err);
+  }));
+  document.querySelector('#saveRules').onclick=saveRules;
+  document.querySelector('#resetRules').onclick=resetRules;
+  document.querySelector('#parseTeams').onclick=()=>handleFile('teams');
+  document.querySelector('#parseMatches').onclick=()=>handleFile('matches');
+  document.querySelector('#parseAuto').onclick=()=>handleFile('auto');
+  document.querySelector('#importBtn').onclick=doImport;
+  document.querySelector('#resetTournament').onclick=resetTournamentState;
+  document.querySelector('#exportCalendar').onclick=exportCalendarCsv;
+  document.querySelector('#exportStandings').onclick=exportStandingsCsv;
+  document.querySelector('#exportPlayoff').onclick=exportPlayoffCsv;
+}
+
+await loadExisting();
+await saveComputedSchedule().catch(() => {});
+renderSetup();
+</script></body></html>

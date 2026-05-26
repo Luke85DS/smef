@@ -1,0 +1,64 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Playoff</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, asArray, teamName, playoffSeedRows, fieldNumber, sportIcon} from './assets/js/app.js';
+renderTop('Playoff','Tabellone playoff e risultati eliminazione diretta.');
+let state = {};
+const roundLabels = {r16:'Ottavi', qf:'Quarti', sf:'Semifinali', final:'Finale'};
+const roundOrder = ['r16','qf','sf','final'];
+const roundClass = {r16:'r16', qf:'qf', sf:'sf', final:'final'};
+const matchCount = {r16:8, qf:4, sf:2, final:1};
+const esc = v => String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+function seedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules); }
+function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id,i+1])); }
+function eliminatedSet(){
+ const out = new Set();
+ const matches = state.playoffs?.matches || {};
+ for(const m of Object.values(matches)){
+   if(!m?.winner) continue;
+   if(m.teamA && m.teamA !== m.winner) out.add(m.teamA);
+   if(m.teamB && m.teamB !== m.winner) out.add(m.teamB);
+ }
+ return out;
+}
+function qualifiedGrid(){
+ const rows = seedRows();
+ const eliminated = eliminatedSet();
+ return `<section class="card playoff-qualified-card"><h2>Qualificate playoff</h2><div class="playoff-qualified-grid">${rows.map((r,i)=>{
+   const rank = i + 1;
+   const isOut = eliminated.has(r.id);
+   return `<div class="playoff-qualified-item"><div class="qualified-rank">#${rank}</div><div class="qualified-team-box ${isOut ? 'is-out' : 'is-in'}">${esc(r.name)}</div></div>`;
+ }).join('')}</div></section>`;
+}
+function emptyMatch(round,index){ return {round,index,teamA:null,teamB:null,chooser:null,sport:null,field:null,scoreA:0,scoreB:0,winner:null,status:'scheduled'}; }
+function scoreNum(v){ return Number(v ?? 0); }
+function teamBlock(teamId, score, winner){
+ const pos = seedMap()[teamId];
+ return `<div class="po-team-block ${winner?'winner':''}">
+   <div class="po-seed">${pos ? `#${pos}` : '&nbsp;'}</div>
+   <div class="po-team-name">${esc(teamName(state.teams, teamId))}</div>
+   <div class="po-score-box">${scoreNum(score)}</div>
+ </div>`;
+}
+function bracketBox(id,m){
+ const empty = !m || (!m.teamA && !m.teamB);
+ const winnerA = m?.winner && m.winner === m.teamA;
+ const winnerB = m?.winner && m.winner === m.teamB;
+ return `<article class="playoff-box ${empty?'empty':''}">
+   <div class="playoff-box-meta"><span class="sport-big">${m?.sport ? sportIcon(m.sport) : '•'}</span>${m?.field ? `<span class="field-under">${fieldNumber(m.field)}</span>` : '<span class="field-under">-</span>'}</div>
+   <div class="po-teams-row">
+     ${teamBlock(m?.teamA, m?.scoreA, winnerA)}
+     ${teamBlock(m?.teamB, m?.scoreB, winnerB)}
+   </div>
+ </article>`;
+}
+function publicRound(round){
+ const p = state.playoffs?.matches || {};
+ const boxes = [];
+ for(let i=1;i<=matchCount[round];i++) boxes.push([`${round}_${i}`, p[`${round}_${i}`] || emptyMatch(round,i)]);
+ return `<section class="card playoff-round-card"><h2>${roundLabels[round]}</h2><div class="playoff-stage playoff-${roundClass[round]}">${boxes.map(([id,m])=>bracketBox(id,m)).join('')}</div></section>`;
+}
+function draw(){
+ document.querySelector('#app').innerHTML = `<div class="playoff-public">${qualifiedGrid()}${roundOrder.map(publicRound).join('')}</div>`;
+}
+listen('/', v=>{state=v||{}; draw();});
+</script></body></html>

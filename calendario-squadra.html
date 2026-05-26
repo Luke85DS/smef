@@ -1,0 +1,20 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Calendario per squadra</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
+<script type="module">
+import {renderTop, listen, asArray, teamName, slotStartLabel, fmtStatus, qs} from './assets/js/app.js';
+renderTop('Calendario per squadra','Scegli una squadra e vedi solo le sue partite.');
+let state = {};
+function selectedTeam(){ return document.querySelector('#teamSelect')?.value || qs.get('team') || ''; }
+function render(){
+ const teams = asArray(state?.teams).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+ const sel = selectedTeam() || teams[0]?.id || '';
+ const matches = asArray(state?.matches).filter(m => m.teamA === sel || m.teamB === sel).sort((a,b)=>Number(a.slot||0)-Number(b.slot||0) || String(a.field).localeCompare(String(b.field)));
+ const options = teams.map(t=>`<option value="${t.id}" ${t.id===sel?'selected':''}>${t.name}</option>`).join('');
+ const rows = matches.map(m=>`<tr><td><b>Turno ${m.slot}</b><br><span class="muted">${slotStartLabel(state?.tournament, m.slot)}</span></td><td>${m.field || '-'}</td><td>${m.sport || '-'}</td><td>${teamName(state?.teams,m.teamA)} - ${teamName(state?.teams,m.teamB)}</td><td class="num">${m.scoreA ?? 0}-${m.scoreB ?? 0}</td><td>${fmtStatus(m.status)}</td></tr>`).join('');
+ document.querySelector('#app').innerHTML = `<div class="card"><div class="formline"><label>Squadra</label><select id="teamSelect">${options}</select></div></div><br><div class="card"><h2>${teamName(state?.teams, sel)}</h2>${matches.length ? `<table><thead><tr><th>Turno</th><th>Campo</th><th>Sport</th><th>Squadre</th><th class="num">Ris.</th><th>Stato</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="muted">Nessuna partita trovata per questa squadra.</p>'}</div>`;
+ document.querySelector('#teamSelect')?.addEventListener('change', e => {
+   const url = new URL(location.href); url.searchParams.set('team', e.target.value); history.replaceState(null, '', url);
+   render();
+ });
+}
+listen('/', s => { state = s || {}; render(); });
+</script></body></html>
