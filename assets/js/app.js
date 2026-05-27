@@ -62,7 +62,24 @@ export const DEFAULT_SCORING_RULES = {
   }
 };
 export function scoringRules(stateOrRules){ const c = stateOrRules?.scoringRules || stateOrRules; return c?.sports ? c : DEFAULT_SCORING_RULES; }
-export function sportKey(sport){ const s = String(sport || "").toLowerCase(); return s === "frisbee" ? "ultimate" : s; }
+export function sportKey(sport){
+  const raw = String(sport || "").toLowerCase().trim();
+  const s = raw
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[🏀🏐⚽🥏️]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  // Accetta sia i valori interni dell'app sia quelli importati da CSV in italiano.
+  if(s.includes("basket") || s === "b" || s === "bb") return "basket";
+  if(s.includes("volley") || s.includes("pallavolo") || s === "pall") return "volley";
+  if(s.includes("calcio") || s.includes("calcetto") || s.includes("futsal") || s.includes("football") || s === "c5") return "calcio";
+  if(s.includes("frisbee") || s.includes("ultimate") || s === "fris") return "ultimate";
+
+  // Fallback per vecchi dati salvati con chiavi gia corrette.
+  if(["basket","volley","calcio","ultimate"].includes(s)) return s;
+  return s;
+}
 export function getSportRule(sport, rules){ const all = scoringRules(rules); return all.sports?.[sportKey(sport)] || DEFAULT_SCORING_RULES.sports[sportKey(sport)] || DEFAULT_SCORING_RULES.sports.calcio; }
 export function calculateMatchPoints(sport, scoreA, scoreB, rules){
   const a = Number(scoreA || 0), b = Number(scoreB || 0), all = scoringRules(rules);
