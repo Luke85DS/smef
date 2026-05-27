@@ -8,8 +8,15 @@ const roundOrder = ['r16','qf','sf','final'];
 const roundClass = {r16:'r16', qf:'qf', sf:'sf', final:'final'};
 const matchCount = {r16:8, qf:4, sf:2, final:1};
 const esc = v => String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
-function seedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules); }
-function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id,i+1])); }
+function calculatedSeedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules).slice(0,16); }
+function storedSeedRows(){
+ const raw = state.playoffs?.seeds;
+ if(!raw) return [];
+ const arr = Array.isArray(raw) ? raw : Object.values(raw);
+ return arr.filter(r=>r && r.id).sort((a,b)=>Number(a.rank||999)-Number(b.rank||999));
+}
+function seedRows(){ return storedSeedRows().length ? storedSeedRows() : calculatedSeedRows(); }
+function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id, Number(r.rank || i+1)])); }
 function eliminatedSet(){
  const out = new Set();
  const matches = state.playoffs?.matches || {};

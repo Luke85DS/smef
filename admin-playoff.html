@@ -1,6 +1,6 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Playoff</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
 <script type="module">
-import {renderTop, listen, patch, write, asArray, teamName, playoffSeedRows, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore} from './assets/js/app.js';
+import {renderTop, listen, patch, write, asArray, teamName, playoffSeedRows, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore, effectiveGameDuration, effectiveBreakDuration} from './assets/js/app.js';
 renderTop('Admin playoff','Gestione tabellone, sport, campi e avanzamento playoff.');
 if(!requireAdmin()) throw new Error('Area admin bloccata');
 let state = {};
@@ -11,8 +11,16 @@ const roundClass = {r16:'r16', qf:'qf', sf:'sf', final:'final'};
 const nextRound = {r16:'qf', qf:'sf', sf:'final'};
 const matchCount = {r16:8, qf:4, sf:2, final:1};
 const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function seedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules); }
-function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id,i+1])); }
+function calculatedSeedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules).slice(0,16); }
+function storedSeedRows(){
+ const raw = state.playoffs?.seeds;
+ if(!raw) return [];
+ const arr = Array.isArray(raw) ? raw : Object.values(raw);
+ return arr.filter(r=>r && r.id).sort((a,b)=>Number(a.rank||999)-Number(b.rank||999));
+}
+function seedRows(){ return storedSeedRows().length ? storedSeedRows() : calculatedSeedRows(); }
+function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id, Number(r.rank || i+1)])); }
+function playoffSeedSnapshot(){ return calculatedSeedRows().map((r,i)=>({id:r.id, name:r.name, rank:i+1, pts:r.pts, played:r.played, gf:r.gf, ga:r.ga, gd:r.gd})); }
 function eliminatedSet(){
  const out = new Set();
  const matches = state.playoffs?.matches || {};
@@ -40,8 +48,8 @@ function allFields(){
  return [...ids].sort((a,b)=>String(a).localeCompare(String(b),'it',{numeric:true}));
 }
 function emptyMatch(round,index){ return {round,index,teamA:null,teamB:null,chooser:null,sport:null,field:null,scoreA:0,scoreB:0,winner:null,status:'scheduled'}; }
-function initialBracket(){
- const seeds = seedRows();
+function initialBracket(seedsInput=null){
+ const seeds = seedsInput || seedRows();
  const out = {};
  for(let i=1;i<=8;i++){
    const a=seeds[i-1], b=seeds[16-i];
@@ -52,10 +60,19 @@ function initialBracket(){
  out.final_1 = emptyMatch('final',1);
  return out;
 }
+async function regenerateQualifiedOnly(){
+ const seeds = playoffSeedSnapshot();
+ if(seeds.length < 16){ alert(`Classifica insufficiente: trovate ${seeds.length} squadre, servono 16 qualificate.`); return; }
+ if(!confirm('Rigenerare le 16 qualificate dalla classifica generale attuale? Questo aggiorna ranking e accoppiamenti degli ottavi.')) return;
+ await patch('playoffs', {seeds, seedsGeneratedAt: Date.now()});
+ await patch('playoffs/matches', initialBracket(seeds));
+}
 async function generateBracket(){
- if(!confirm('Rigenerare il tabellone dagli attuali primi 16 della classifica? I dati playoff esistenti verranno sostituiti.')) return;
- await write('playoffs/matches', initialBracket());
- await patch('playoffs', {generatedAt: Date.now()});
+ if(!confirm('Rigenerare completamente il tabellone dagli attuali primi 16 della classifica? I dati playoff esistenti verranno sostituiti.')) return;
+ const seeds = playoffSeedSnapshot();
+ if(seeds.length < 16){ alert(`Classifica insufficiente: trovate ${seeds.length} squadre, servono 16 qualificate.`); return; }
+ await write('playoffs/matches', initialBracket(seeds));
+ await patch('playoffs', {seeds, generatedAt: Date.now(), seedsGeneratedAt: Date.now()});
 }
 function completedRound(round){
  const rows = Object.values(state.playoffs?.matches || {}).filter(m=>m.round===round);
@@ -94,8 +111,10 @@ async function setSport(id, sport){
 }
 async function setField(id, field){
  const val = field || null;
+ const old = state.playoffs?.matches?.[id]?.field;
  await patch(`playoffs/matches/${id}`, {field: val});
- if(val) await patch(`fields/${val}`, {playoffMatch:id});
+ if(old && old !== val) await patch(`fields/${old}`, {playoffMatch:null,status:'waiting',ready:false});
+ if(val) await patch(`fields/${val}`, {playoffMatch:id,status:'waiting',ready:false});
 }
 async function setWinner(id, winner){
  const m = state.playoffs?.matches?.[id]; if(!m || !winner) return;
@@ -111,7 +130,25 @@ async function undoWinner(id){
  await patch(`playoffs/matches/${id}`, {winner:null, status:'in_progress'});
 }
 async function activateRound(round){
- await patch('tournament', {mode:'playoff', playoffRound:round, phase:'waiting', timerRunning:false, timerStart:null});
+ await patch('tournament', {mode:'playoff', playoffRound:round, phase:'waiting', timerRunning:false, timerStart:null, timerDuration:effectiveGameDuration(state.tournament)});
+ for(const m of Object.values(state.playoffs?.matches || {}).filter(x=>x.round===round && x.field)){
+   await patch(`fields/${m.field}`, {playoffMatch:m.id,status:'waiting',ready:false});
+ }
+}
+async function startPlayoffTime(){
+ const round = state?.tournament?.playoffRound;
+ if(!round){ alert('Attiva prima un round playoff.'); return; }
+ await patch('tournament', {mode:'playoff', playoffRound:round, phase:'game', timerRunning:true, timerStart:Date.now(), timerDuration:effectiveGameDuration(state.tournament)});
+ for(const m of Object.values(state.playoffs?.matches || {}).filter(x=>x.round===round && x.teamA && x.teamB && x.field && x.status!=='final')){
+   await patch(`playoffs/matches/${m.id}`, {status:'in_progress'});
+   await patch(`fields/${m.field}`, {playoffMatch:m.id,status:'playing',ready:false});
+ }
+}
+async function startPlayoffBreak(){
+ const round = state?.tournament?.playoffRound;
+ if(!round) return;
+ for(const m of Object.values(state.playoffs?.matches || {}).filter(x=>x.round===round && x.status==='in_progress')) await patch(`playoffs/matches/${m.id}`, {status:'final'});
+ await patch('tournament', {mode:'playoff', playoffRound:round, phase:'break', timerRunning:true, timerStart:Date.now(), timerDuration:effectiveBreakDuration(state.tournament)});
 }
 async function backToGroup(){ await patch('tournament', {mode:'groups', playoffRound:null, phase:'waiting', timerRunning:false, timerStart:null}); }
 function scoreFor(m){ return `${Number(m.scoreA || 0)} - ${Number(m.scoreB || 0)}`; }
@@ -159,12 +196,15 @@ function adminRow(id,m){
 }
 function adminPanel(){
  const p = state.playoffs?.matches || {};
- return `<section class="card admin-playoff-panel"><h2>Admin playoff</h2><p class="muted">Genera da classifica, assegna sport/campo e attiva il round per display e pagine campo.</p><div class="row"><button id="generate" class="btn primary">Genera da classifica</button>${roundOrder.map(r=>`<button class="btn ${state?.tournament?.playoffRound===r?'ok':'primary'}" data-action="activate" data-round="${r}">Attiva ${roundLabels[r]}</button>`).join('')}<button id="backGroup" class="btn warn">Torna ai turni</button></div><br>${roundOrder.map(round=>{ const rows=[]; for(let i=1;i<=matchCount[round];i++){ const id=`${round}_${i}`; rows.push([id,p[id]||emptyMatch(round,i)]); } return `<h3>${roundLabels[round]}</h3><table class="compact-table"><thead><tr><th>Box</th><th>Squadre</th><th>Sport</th><th>Campo</th><th class="num">Ris.</th><th>Vincente</th></tr></thead><tbody>${rows.map(([id,m])=>adminRow(id,m)).join('')}</tbody></table>`; }).join('') }</section>`;
+ return `<section class="card admin-playoff-panel"><h2>Admin playoff</h2><p class="muted">Genera da classifica, assegna sport/campo e attiva il round per display e pagine campo.</p><div class="row"><button id="regenSeeds" class="btn warn">Rigenera qualificate</button><button id="generate" class="btn primary">Rigenera tabellone completo</button>${roundOrder.map(r=>`<button class="btn ${state?.tournament?.playoffRound===r?'ok':'primary'}" data-action="activate" data-round="${r}">Attiva ${roundLabels[r]}</button>`).join('')}<button id="startPlayoff" class="btn ok">Avvia tempo playoff</button><button id="breakPlayoff" class="btn warn">Forza pausa</button><button id="backGroup" class="btn warn">Torna ai turni</button></div><p class="muted">“Rigenera qualificate” prende le prime 16 dalla classifica generale attuale e ricrea gli ottavi 1-16, 2-15, ecc.</p><br>${roundOrder.map(round=>{ const rows=[]; for(let i=1;i<=matchCount[round];i++){ const id=`${round}_${i}`; rows.push([id,p[id]||emptyMatch(round,i)]); } return `<h3>${roundLabels[round]}</h3><table class="compact-table"><thead><tr><th>Box</th><th>Squadre</th><th>Sport</th><th>Campo</th><th class="num">Ris.</th><th>Vincente</th></tr></thead><tbody>${rows.map(([id,m])=>adminRow(id,m)).join('')}</tbody></table>`; }).join('') }</section>`;
 }
 function draw(){
  document.querySelector('#app').innerHTML = `<div class="playoff-public">${qualifiedGrid()}${roundOrder.map(publicRound).join('')}</div><br>${adminPanel()}`;
  const gen = document.querySelector('#generate'); if(gen) gen.onclick = generateBracket;
+ const regen = document.querySelector('#regenSeeds'); if(regen) regen.onclick = regenerateQualifiedOnly;
  const bg = document.querySelector('#backGroup'); if(bg) bg.onclick = backToGroup;
+ const sp = document.querySelector('#startPlayoff'); if(sp) sp.onclick = startPlayoffTime;
+ const bp = document.querySelector('#breakPlayoff'); if(bp) bp.onclick = startPlayoffBreak;
  document.querySelectorAll('[data-action="activate"]').forEach(el=>el.onclick=()=>activateRound(el.dataset.round));
  document.querySelectorAll('[data-action="sport"]').forEach(el=>el.onchange=e=>setSport(e.target.dataset.id, e.target.value));
  document.querySelectorAll('[data-action="field"]').forEach(el=>el.onchange=e=>setField(e.target.dataset.id, e.target.value));
