@@ -213,7 +213,7 @@ export function describeMatchPoints(match, rules){
   const pts = calculateMatchPoints(match.sport, match.scoreA, match.scoreB, rules);
   return `${pts.a}-${pts.b}${pts.margin && pts.margin !== "D" ? ` ${pts.margin}` : pts.margin === "D" ? " pareggio" : ""}`;
 }
-export function playoffSeedRows(teams, matches, rules){ return computeStandings(teams, matches, rules, "official").slice(0,16); }
+export function playoffSeedRows(teams, matches, rules){ return computeStandings(teams, matches, rules, "live").slice(0,16); }
 export function canChooseSport(playoffs, teamId, sport, currentId=null){
   const chosen = Object.entries(playoffs?.matches || {}).filter(([id,m]) => id !== currentId && m.chooser === teamId && sportKey(m.sport) === sportKey(sport));
   return chosen.length === 0;

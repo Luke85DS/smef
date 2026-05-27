@@ -20,7 +20,32 @@ function storedSeedRows(){
 }
 function seedRows(){ return storedSeedRows().length ? storedSeedRows() : calculatedSeedRows(); }
 function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id, Number(r.rank || i+1)])); }
-function playoffSeedSnapshot(){ return calculatedSeedRows().map((r,i)=>({id:r.id, name:r.name, rank:i+1, pts:r.pts, played:r.played, gf:r.gf, ga:r.ga, gd:r.gd})); }
+function playoffSeedSnapshot(){
+ // Fonte unica per i playoff: stesso ordinamento della pagina Classifica.
+ // Non usa mai ranking salvati, cosi il pulsante rigenera non puo pescare dati vecchi.
+ return calculatedSeedRows().map((r,i)=>({
+   id:r.id,
+   name:r.name,
+   rank:i+1,
+   pts:Number(r.pts||0),
+   played:Number(r.played||0),
+   gf:Number(r.gf||0),
+   ga:Number(r.ga||0),
+   gd:Number(r.gd||0)
+ }));
+}
+function rankingMismatch(){
+ const calc = playoffSeedSnapshot();
+ const stored = storedSeedRows();
+ if(stored.length !== calc.length) return true;
+ return calc.some((r,i)=> stored[i]?.id !== r.id || Number(stored[i]?.rank||i+1) !== r.rank || Number(stored[i]?.pts||0) !== r.pts || Number(stored[i]?.gd||0) !== r.gd);
+}
+function computedRankingPreview(){
+ const calc = playoffSeedSnapshot();
+ const stored = storedSeedRows();
+ const mismatch = rankingMismatch();
+ return `<section class="card"><h2>Ranking playoff calcolato ora</h2><p class="muted">Questa tabella deve coincidere con la pagina Classifica. Se il tabellone usa dati vecchi, premi “Rigenera qualificate”.</p>${mismatch?'<p class="pill bad">Ranking playoff non allineato alla classifica attuale</p>':'<p class="pill ok">Ranking playoff allineato</p>'}<table class="compact-table"><thead><tr><th>#</th><th>Squadra</th><th class="num">Pt</th><th class="num">PG</th><th class="num">DP</th><th>Nel playoff salvato</th></tr></thead><tbody>${calc.map((r,i)=>`<tr><td>${r.rank}</td><td><b>${esc(r.name)}</b></td><td class="num">${r.pts}</td><td class="num">${r.played}</td><td class="num">${r.gd}</td><td>${stored[i]?.id===r.id?'OK':`Salvato: ${esc(teamName(state.teams, stored[i]?.id))}`}</td></tr>`).join('')}</tbody></table></section>`;
+}
 function eliminatedSet(){
  const out = new Set();
  const matches = state.playoffs?.matches || {};
@@ -63,16 +88,22 @@ function initialBracket(seedsInput=null){
 async function regenerateQualifiedOnly(){
  const seeds = playoffSeedSnapshot();
  if(seeds.length < 16){ alert(`Classifica insufficiente: trovate ${seeds.length} squadre, servono 16 qualificate.`); return; }
- if(!confirm('Rigenerare le 16 qualificate dalla classifica generale attuale? Questo aggiorna ranking e accoppiamenti degli ottavi.')) return;
- await patch('playoffs', {seeds, seedsGeneratedAt: Date.now()});
- await patch('playoffs/matches', initialBracket(seeds));
+ const msg = 'Rigenerare le 16 qualificate dalla classifica attuale?\n\nQuesta operazione sovrascrive ranking playoff, ottavi, quarti, semifinali e finale. Usa la stessa classifica visibile nella pagina Classifica.';
+ if(!confirm(msg)) return;
+ const matches = initialBracket(seeds);
+ // Scrittura pulita: set diretto sui path, non merge parziale. Evita residui di ranking/bracket vecchi.
+ await write('playoffs/seeds', seeds);
+ await write('playoffs/matches', matches);
+ await patch('playoffs', {generatedAt: Date.now(), seedsGeneratedAt: Date.now(), rankingSource:'classifica-live'});
+ alert('Qualificate rigenerate dalla classifica attuale. Controlla la tabella Ranking playoff calcolato ora.');
 }
 async function generateBracket(){
- if(!confirm('Rigenerare completamente il tabellone dagli attuali primi 16 della classifica? I dati playoff esistenti verranno sostituiti.')) return;
  const seeds = playoffSeedSnapshot();
  if(seeds.length < 16){ alert(`Classifica insufficiente: trovate ${seeds.length} squadre, servono 16 qualificate.`); return; }
+ if(!confirm('Rigenerare completamente il tabellone dagli attuali primi 16 della classifica? I dati playoff esistenti verranno sostituiti.')) return;
+ await write('playoffs/seeds', seeds);
  await write('playoffs/matches', initialBracket(seeds));
- await patch('playoffs', {seeds, generatedAt: Date.now(), seedsGeneratedAt: Date.now()});
+ await patch('playoffs', {generatedAt: Date.now(), seedsGeneratedAt: Date.now(), rankingSource:'classifica-live'});
 }
 function completedRound(round){
  const rows = Object.values(state.playoffs?.matches || {}).filter(m=>m.round===round);
@@ -196,10 +227,10 @@ function adminRow(id,m){
 }
 function adminPanel(){
  const p = state.playoffs?.matches || {};
- return `<section class="card admin-playoff-panel"><h2>Admin playoff</h2><p class="muted">Genera da classifica, assegna sport/campo e attiva il round per display e pagine campo.</p><div class="row"><button id="regenSeeds" class="btn warn">Rigenera qualificate</button><button id="generate" class="btn primary">Rigenera tabellone completo</button>${roundOrder.map(r=>`<button class="btn ${state?.tournament?.playoffRound===r?'ok':'primary'}" data-action="activate" data-round="${r}">Attiva ${roundLabels[r]}</button>`).join('')}<button id="startPlayoff" class="btn ok">Avvia tempo playoff</button><button id="breakPlayoff" class="btn warn">Forza pausa</button><button id="backGroup" class="btn warn">Torna ai turni</button></div><p class="muted">“Rigenera qualificate” prende le prime 16 dalla classifica generale attuale e ricrea gli ottavi 1-16, 2-15, ecc.</p><br>${roundOrder.map(round=>{ const rows=[]; for(let i=1;i<=matchCount[round];i++){ const id=`${round}_${i}`; rows.push([id,p[id]||emptyMatch(round,i)]); } return `<h3>${roundLabels[round]}</h3><table class="compact-table"><thead><tr><th>Box</th><th>Squadre</th><th>Sport</th><th>Campo</th><th class="num">Ris.</th><th>Vincente</th></tr></thead><tbody>${rows.map(([id,m])=>adminRow(id,m)).join('')}</tbody></table>`; }).join('') }</section>`;
+ return `<section class="card admin-playoff-panel"><h2>Admin playoff</h2><p class="muted">Genera da classifica, assegna sport/campo e attiva il round per display e pagine campo.</p><div class="row"><button id="regenSeeds" class="btn bad">Rigenera qualificate dalla classifica</button><button id="generate" class="btn primary">Rigenera tabellone completo</button>${roundOrder.map(r=>`<button class="btn ${state?.tournament?.playoffRound===r?'ok':'primary'}" data-action="activate" data-round="${r}">Attiva ${roundLabels[r]}</button>`).join('')}<button id="startPlayoff" class="btn ok">Avvia tempo playoff</button><button id="breakPlayoff" class="btn warn">Forza pausa</button><button id="backGroup" class="btn warn">Torna ai turni</button></div><p class="muted">“Rigenera qualificate” prende le prime 16 dalla classifica generale attuale e ricrea gli ottavi 1-16, 2-15, ecc.</p><br>${roundOrder.map(round=>{ const rows=[]; for(let i=1;i<=matchCount[round];i++){ const id=`${round}_${i}`; rows.push([id,p[id]||emptyMatch(round,i)]); } return `<h3>${roundLabels[round]}</h3><table class="compact-table"><thead><tr><th>Box</th><th>Squadre</th><th>Sport</th><th>Campo</th><th class="num">Ris.</th><th>Vincente</th></tr></thead><tbody>${rows.map(([id,m])=>adminRow(id,m)).join('')}</tbody></table>`; }).join('') }</section>`;
 }
 function draw(){
- document.querySelector('#app').innerHTML = `<div class="playoff-public">${qualifiedGrid()}${roundOrder.map(publicRound).join('')}</div><br>${adminPanel()}`;
+ document.querySelector('#app').innerHTML = `${computedRankingPreview()}<br><div class="playoff-public">${qualifiedGrid()}${roundOrder.map(publicRound).join('')}</div><br>${adminPanel()}`;
  const gen = document.querySelector('#generate'); if(gen) gen.onclick = generateBracket;
  const regen = document.querySelector('#regenSeeds'); if(regen) regen.onclick = regenerateQualifiedOnly;
  const bg = document.querySelector('#backGroup'); if(bg) bg.onclick = backToGroup;
