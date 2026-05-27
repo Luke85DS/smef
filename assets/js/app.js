@@ -63,7 +63,16 @@ export const DEFAULT_SCORING_RULES = {
 };
 export function scoringRules(stateOrRules){ const c = stateOrRules?.scoringRules || stateOrRules; return c?.sports ? c : DEFAULT_SCORING_RULES; }
 export function sportKey(sport){
-  const raw = String(sport || "").toLowerCase().trim();
+  const rawOriginal = String(sport || "").trim();
+  const raw = rawOriginal.toLowerCase();
+
+  // Prima controlla le emoji. Se le rimuovi subito, uno sport importato come solo "🏀"
+  // diventerebbe stringa vuota e cadrebbe sul fallback del calcio.
+  if(rawOriginal.includes("🏀")) return "basket";
+  if(rawOriginal.includes("🏐")) return "volley";
+  if(rawOriginal.includes("⚽")) return "calcio";
+  if(rawOriginal.includes("🥏")) return "ultimate";
+
   const s = raw
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[🏀🏐⚽🥏️]/g, "")
@@ -77,7 +86,7 @@ export function sportKey(sport){
   if(s.includes("frisbee") || s.includes("ultimate") || s === "fris") return "ultimate";
 
   // Fallback per vecchi dati salvati con chiavi gia corrette.
-  if(["basket","volley","calcio","ultimate"].includes(s)) return s;
+  if(["basket","volley","calcio","ultimate","frisbee"].includes(s)) return s === "frisbee" ? "ultimate" : s;
   return s;
 }
 export function getSportRule(sport, rules){ const all = scoringRules(rules); return all.sports?.[sportKey(sport)] || DEFAULT_SCORING_RULES.sports[sportKey(sport)] || DEFAULT_SCORING_RULES.sports.calcio; }
@@ -117,11 +126,11 @@ export function computeStandings(teams, matches, rules, mode="live"){
 }
 
 export function sportIcon(sport){
-  const s = String(sport || "").toLowerCase();
-  if(s.includes("basket")) return "🏀";
-  if(s.includes("volley") || s.includes("pallav")) return "🏐";
-  if(s.includes("calcio") || s.includes("football") || s.includes("futsal")) return "⚽️";
-  if(s.includes("frisbee") || s.includes("ultimate")) return "🥏";
+  const k = sportKey(sport);
+  if(k === "basket") return "🏀";
+  if(k === "volley") return "🏐";
+  if(k === "calcio") return "⚽️";
+  if(k === "ultimate" || k === "frisbee") return "🥏";
   return "•";
 }
 export function fieldNumber(field){
