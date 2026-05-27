@@ -18,7 +18,17 @@ function storedSeedRows(){
  const arr = Array.isArray(raw) ? raw : Object.values(raw);
  return arr.filter(r=>r && r.id).sort((a,b)=>Number(a.rank||999)-Number(b.rank||999));
 }
-function seedRows(){ return storedSeedRows().length ? storedSeedRows() : calculatedSeedRows(); }
+function seedRows(){
+ const current = calculatedSeedRows();
+ const currentById = Object.fromEntries(current.map(r=>[r.id,r]));
+ const stored = storedSeedRows();
+ // Mantieni l'ordine playoff salvato, ma usa sempre statistiche aggiornate
+ // dalla stessa classifica pubblica. Evita PG/punti vecchi dopo correzioni o finalizzazioni tardive.
+ if(stored.length){
+   return stored.map((r,i)=>({...(currentById[r.id] || r), rank:Number(r.rank || i+1)}));
+ }
+ return current;
+}
 function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id, Number(r.rank || i+1)])); }
 function playoffSeedSnapshot(){
  // Fonte unica per i playoff: stesso ordinamento della pagina Classifica.
@@ -38,7 +48,7 @@ function rankingMismatch(){
  const calc = playoffSeedSnapshot();
  const stored = storedSeedRows();
  if(stored.length !== calc.length) return true;
- return calc.some((r,i)=> stored[i]?.id !== r.id || Number(stored[i]?.rank||i+1) !== r.rank || Number(stored[i]?.pts||0) !== r.pts || Number(stored[i]?.gd||0) !== r.gd);
+ return calc.some((r,i)=> stored[i]?.id !== r.id || Number(stored[i]?.rank||i+1) !== r.rank);
 }
 function computedRankingPreview(){
  const calc = playoffSeedSnapshot();

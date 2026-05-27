@@ -1,6 +1,6 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Playoff</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
 <script type="module">
-import {renderTop, listen, asArray, teamName, playoffSeedRows, fieldNumber, sportIcon} from './assets/js/app.js';
+import {renderTop, listen, asArray, teamName, rankingRowsFromState, fieldNumber, sportIcon} from './assets/js/app.js';
 renderTop('Playoff','Tabellone playoff e risultati eliminazione diretta.');
 let state = {};
 const roundLabels = {r16:'Ottavi', qf:'Quarti', sf:'Semifinali', final:'Finale'};
@@ -15,7 +15,19 @@ function storedSeedRows(){
  const arr = Array.isArray(raw) ? raw : Object.values(raw);
  return arr.filter(r=>r && r.id).sort((a,b)=>Number(a.rank||999)-Number(b.rank||999));
 }
-function seedRows(){ return storedSeedRows().length ? storedSeedRows() : calculatedSeedRows(); }
+function seedRows(){
+ const current = calculatedSeedRows();
+ const currentById = Object.fromEntries(current.map(r=>[r.id,r]));
+ const stored = storedSeedRows();
+ // Se il tabellone e gia stato generato, mantieni ordine/ranking salvati,
+ // ma ricarica sempre PG/punti/DP dalla classifica attuale. Prima qui
+ // venivano mostrati stats vecchi: per questo alcune squadre risultavano
+ // con una partita in meno rispetto alla classifica reale.
+ if(stored.length){
+   return stored.map((r,i)=>({...(currentById[r.id] || r), rank:Number(r.rank || i+1)}));
+ }
+ return current;
+}
 function seedMap(){ return Object.fromEntries(seedRows().map((r,i)=>[r.id, Number(r.rank || i+1)])); }
 function eliminatedSet(){
  const out = new Set();
