@@ -1,6 +1,6 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Playoff</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
 <script type="module">
-import {renderTop, listen, patch, write, asArray, teamName, playoffSeedRows, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore, effectiveGameDuration, effectiveBreakDuration} from './assets/js/app.js';
+import {renderTop, listen, patch, write, asArray, teamName, rankingRowsFromState, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore, effectiveGameDuration, effectiveBreakDuration} from './assets/js/app.js';
 renderTop('Admin playoff','Gestione tabellone, sport, campi e avanzamento playoff.');
 if(!requireAdmin()) throw new Error('Area admin bloccata');
 let state = {};
@@ -11,7 +11,7 @@ const roundClass = {r16:'r16', qf:'qf', sf:'sf', final:'final'};
 const nextRound = {r16:'qf', qf:'sf', sf:'final'};
 const matchCount = {r16:8, qf:4, sf:2, final:1};
 const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function calculatedSeedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules).slice(0,16); }
+function calculatedSeedRows(){ return rankingRowsFromState(state, 'live').slice(0,16); }
 function storedSeedRows(){
  const raw = state.playoffs?.seeds;
  if(!raw) return [];
@@ -26,7 +26,7 @@ function playoffSeedSnapshot(){
  return calculatedSeedRows().map((r,i)=>({
    id:r.id,
    name:r.name,
-   rank:i+1,
+   rank:Number(r.rank || i+1),
    pts:Number(r.pts||0),
    played:Number(r.played||0),
    gf:Number(r.gf||0),
@@ -94,7 +94,7 @@ async function regenerateQualifiedOnly(){
  // Scrittura pulita: set diretto sui path, non merge parziale. Evita residui di ranking/bracket vecchi.
  await write('playoffs/seeds', seeds);
  await write('playoffs/matches', matches);
- await patch('playoffs', {generatedAt: Date.now(), seedsGeneratedAt: Date.now(), rankingSource:'classifica-live'});
+ await patch('playoffs', {generatedAt: Date.now(), seedsGeneratedAt: Date.now(), rankingSource:'rankingRowsFromState-live'});
  alert('Qualificate rigenerate dalla classifica attuale. Controlla la tabella Ranking playoff calcolato ora.');
 }
 async function generateBracket(){
@@ -103,7 +103,7 @@ async function generateBracket(){
  if(!confirm('Rigenerare completamente il tabellone dagli attuali primi 16 della classifica? I dati playoff esistenti verranno sostituiti.')) return;
  await write('playoffs/seeds', seeds);
  await write('playoffs/matches', initialBracket(seeds));
- await patch('playoffs', {generatedAt: Date.now(), seedsGeneratedAt: Date.now(), rankingSource:'classifica-live'});
+ await patch('playoffs', {generatedAt: Date.now(), seedsGeneratedAt: Date.now(), rankingSource:'rankingRowsFromState-live'});
 }
 function completedRound(round){
  const rows = Object.values(state.playoffs?.matches || {}).filter(m=>m.round===round);

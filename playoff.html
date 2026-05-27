@@ -8,7 +8,7 @@ const roundOrder = ['r16','qf','sf','final'];
 const roundClass = {r16:'r16', qf:'qf', sf:'sf', final:'final'};
 const matchCount = {r16:8, qf:4, sf:2, final:1};
 const esc = v => String(v ?? '').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
-function calculatedSeedRows(){ return playoffSeedRows(state.teams, state.matches, state.scoringRules).slice(0,16); }
+function calculatedSeedRows(){ return rankingRowsFromState(state, 'live').slice(0,16); }
 function storedSeedRows(){
  const raw = state.playoffs?.seeds;
  if(!raw) return [];

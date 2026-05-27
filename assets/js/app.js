@@ -188,7 +188,14 @@ export function computeStandings(teams, matches, rules, mode="live"){
     id, name:base[id].name, pts:use[id].pts, official:off[id].pts, live:live[id].pts, delta:live[id].pts-off[id].pts,
     played:use[id].played, wins:use[id].wins, draws:use[id].draws, losses:use[id].losses, gf:use[id].gf, ga:use[id].ga, gd:use[id].gf-use[id].ga,
     playedOfficial:off[id].played, playedLive:live[id].played, gfOfficial:off[id].gf, gaOfficial:off[id].ga, gdOfficial:off[id].gf-off[id].ga, gfLive:live[id].gf, gaLive:live[id].ga, gdLive:live[id].gf-live[id].ga
-  })).sort((a,b) => b.pts-a.pts || b.gd-a.gd || b.gf-a.gf || a.name.localeCompare(b.name));
+  })).sort(sortStandingsRows).map((r,i)=>({...r, rank:i+1}));
+}
+export function sortStandingsRows(a,b){
+  return b.pts-a.pts || b.gd-a.gd || b.gf-a.gf || String(a.name||'').localeCompare(String(b.name||''),'it',{sensitivity:'base'});
+}
+export function rankingRowsFromState(state, mode="live"){
+  const s = state || {};
+  return computeStandings(s.teams || {}, s.matches || {}, s.scoringRules || {}, mode);
 }
 
 export function sportIcon(sport){
@@ -213,7 +220,12 @@ export function describeMatchPoints(match, rules){
   const pts = calculateMatchPoints(match.sport, match.scoreA, match.scoreB, rules);
   return `${pts.a}-${pts.b}${pts.margin && pts.margin !== "D" ? ` ${pts.margin}` : pts.margin === "D" ? " pareggio" : ""}`;
 }
-export function playoffSeedRows(teams, matches, rules){ return computeStandings(teams, matches, rules, "live").slice(0,16); }
+export function playoffSeedRows(stateOrTeams, matches=null, rules=null){
+  // Compatibilita: preferire sempre rankingRowsFromState(state). Questo evita che
+  // classifica e playoff usino inavvertitamente due ordinamenti diversi.
+  if(matches === null && rules === null) return rankingRowsFromState(stateOrTeams, "live").slice(0,16);
+  return computeStandings(stateOrTeams || {}, matches || {}, rules || {}, "live").slice(0,16);
+}
 export function canChooseSport(playoffs, teamId, sport, currentId=null){
   const chosen = Object.entries(playoffs?.matches || {}).filter(([id,m]) => id !== currentId && m.chooser === teamId && sportKey(m.sport) === sportKey(sport));
   return chosen.length === 0;
