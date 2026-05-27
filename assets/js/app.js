@@ -61,7 +61,44 @@ export const DEFAULT_SCORING_RULES = {
     frisbee: { label: "Frisbee", margins: [{ code: "MB", maxDiff: 2, winner: 4, loser: 2 },{ code: "MM", maxDiff: 3, winner: 5, loser: 1 },{ code: "MA", maxDiff: null, winner: 6, loser: 0 }] }
   }
 };
-export function scoringRules(stateOrRules){ const c = stateOrRules?.scoringRules || stateOrRules; return c?.sports ? c : DEFAULT_SCORING_RULES; }
+function cloneRules(obj){ return JSON.parse(JSON.stringify(obj)); }
+export function scoringRules(stateOrRules){
+  const input = stateOrRules?.scoringRules || stateOrRules || {};
+  const out = cloneRules(DEFAULT_SCORING_RULES);
+
+  // Merge robusto: il database puo contenere regole vecchie, incomplete o con chiavi diverse.
+  if(input.draw && input.draw.each !== undefined) out.draw.each = Number(input.draw.each);
+
+  const aliases = {
+    basket: 'basket', pallacanestro: 'basket', '🏀': 'basket',
+    volley: 'volley', pallavolo: 'volley', '🏐': 'volley',
+    calcio: 'calcio', calcetto: 'calcio', futsal: 'calcio', football: 'calcio', 'calcio a 5': 'calcio', '⚽': 'calcio', '⚽️': 'calcio',
+    frisbee: 'ultimate', ultimate: 'ultimate', '🥏': 'ultimate'
+  };
+
+  for(const [rawKey, rawRule] of Object.entries(input.sports || {})){
+    const key = aliases[String(rawKey).toLowerCase().trim()] || sportKey(rawKey);
+    if(!out.sports[key] || !rawRule) continue;
+    const base = out.sports[key];
+    if(rawRule.label) base.label = rawRule.label;
+    if(Array.isArray(rawRule.margins)){
+      const byCode = Object.fromEntries(rawRule.margins.map(m => [String(m.code || '').toUpperCase(), m]));
+      base.margins = base.margins.map(def => {
+        const custom = byCode[String(def.code).toUpperCase()];
+        if(!custom) return def;
+        return {
+          code: def.code,
+          maxDiff: def.maxDiff === null ? null : Number(custom.maxDiff ?? def.maxDiff),
+          winner: Number(custom.winner ?? def.winner),
+          loser: Number(custom.loser ?? def.loser)
+        };
+      });
+    }
+  }
+  // Alias legacy: vecchie parti dell'app possono chiedere frisbee.
+  out.sports.frisbee = out.sports.ultimate;
+  return out;
+}
 export function sportKey(sport){
   const rawOriginal = String(sport || "").trim();
   const raw = rawOriginal.toLowerCase();
@@ -90,13 +127,23 @@ export function sportKey(sport){
   return s;
 }
 export function getSportRule(sport, rules){ const all = scoringRules(rules); return all.sports?.[sportKey(sport)] || DEFAULT_SCORING_RULES.sports[sportKey(sport)] || DEFAULT_SCORING_RULES.sports.calcio; }
+function safeScore(v){
+  if(v === null || v === undefined || v === '') return 0;
+  const n = Number(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
 export function calculateMatchPoints(sport, scoreA, scoreB, rules){
-  const a = Number(scoreA || 0), b = Number(scoreB || 0), all = scoringRules(rules);
-  if(a === b){ const pts = Number(all.draw?.each ?? 3); return { a: pts, b: pts, margin: "D", diff: 0 }; }
+  const a = safeScore(scoreA), b = safeScore(scoreB), all = scoringRules(rules);
+  if(a === b){ const pts = Number(all.draw?.each ?? 3); return { a: pts, b: pts, margin: "D", diff: 0, sportKey: sportKey(sport) }; }
   const diff = Math.abs(a-b), rule = getSportRule(sport, all);
-  const margin = (rule.margins || []).find(m => m.maxDiff === null || diff <= Number(m.maxDiff));
+  const sortedMargins = (rule.margins || []).slice().sort((x,y) => {
+    if(x.maxDiff === null) return 1;
+    if(y.maxDiff === null) return -1;
+    return Number(x.maxDiff) - Number(y.maxDiff);
+  });
+  const margin = sortedMargins.find(m => m.maxDiff === null || diff <= Number(m.maxDiff));
   const winner = Number(margin?.winner ?? 3), loser = Number(margin?.loser ?? 0);
-  return a > b ? { a:winner, b:loser, margin:margin?.code || "", diff } : { a:loser, b:winner, margin:margin?.code || "", diff };
+  return a > b ? { a:winner, b:loser, margin:margin?.code || "", diff, sportKey: sportKey(sport) } : { a:loser, b:winner, margin:margin?.code || "", diff, sportKey: sportKey(sport) };
 }
 function ensureRow(row, teams, id){ if(id && !row[id]) row[id] = {id, name:teamName(teams,id), pts:0, played:0, wins:0, draws:0, losses:0, gf:0, ga:0}; }
 function applyResult(row, match, teams, includeLive, rules){
