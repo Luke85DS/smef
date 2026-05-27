@@ -86,11 +86,12 @@ export function scoringRules(stateOrRules){
       base.margins = base.margins.map(def => {
         const custom = byCode[String(def.code).toUpperCase()];
         if(!custom) return def;
+        const parsedMax = safeMaxDiff(custom.maxDiff ?? def.maxDiff);
         return {
           code: def.code,
-          maxDiff: def.maxDiff === null ? null : Number(custom.maxDiff ?? def.maxDiff),
-          winner: Number(custom.winner ?? def.winner),
-          loser: Number(custom.loser ?? def.loser)
+          maxDiff: def.maxDiff === null ? null : (parsedMax === null ? def.maxDiff : parsedMax),
+          winner: safeScore(custom.winner ?? def.winner),
+          loser: safeScore(custom.loser ?? def.loser)
         };
       });
     }
@@ -132,18 +133,36 @@ function safeScore(v){
   const n = Number(String(v).replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 }
+function safeMaxDiff(v){
+  if(v === null || v === undefined || v === '' || String(v).toLowerCase() === 'oltre' || String(v).toLowerCase() === 'ma' || String(v).toLowerCase() === 'alto') return null;
+  const n = Number(String(v).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+function normalizeMarginRows(rule){
+  const rows = Array.isArray(rule?.margins) ? rule.margins : [];
+  const normalized = rows.map(m => ({
+    code: String(m?.code || '').toUpperCase().trim(),
+    maxDiff: safeMaxDiff(m?.maxDiff),
+    winner: safeScore(m?.winner),
+    loser: safeScore(m?.loser)
+  })).filter(m => m.code);
+
+  // MB e MM devono essere soglie finite; MA e sempre il fallback finale.
+  const finite = normalized
+    .filter(m => m.code !== 'MA' && m.maxDiff !== null)
+    .sort((a,b) => a.maxDiff - b.maxDiff);
+  const high = normalized.find(m => m.code === 'MA') || normalized.find(m => m.maxDiff === null) || {code:'MA', maxDiff:null, winner:6, loser:0};
+  return [...finite, {...high, code: high.code || 'MA', maxDiff: null}];
+}
 export function calculateMatchPoints(sport, scoreA, scoreB, rules){
   const a = safeScore(scoreA), b = safeScore(scoreB), all = scoringRules(rules);
-  if(a === b){ const pts = Number(all.draw?.each ?? 3); return { a: pts, b: pts, margin: "D", diff: 0, sportKey: sportKey(sport) }; }
+  const key = sportKey(sport);
+  if(a === b){ const pts = Number(all.draw?.each ?? 3); return { a: pts, b: pts, margin: "D", diff: 0, sportKey: key }; }
   const diff = Math.abs(a-b), rule = getSportRule(sport, all);
-  const sortedMargins = (rule.margins || []).slice().sort((x,y) => {
-    if(x.maxDiff === null) return 1;
-    if(y.maxDiff === null) return -1;
-    return Number(x.maxDiff) - Number(y.maxDiff);
-  });
-  const margin = sortedMargins.find(m => m.maxDiff === null || diff <= Number(m.maxDiff));
-  const winner = Number(margin?.winner ?? 3), loser = Number(margin?.loser ?? 0);
-  return a > b ? { a:winner, b:loser, margin:margin?.code || "", diff, sportKey: sportKey(sport) } : { a:loser, b:winner, margin:margin?.code || "", diff, sportKey: sportKey(sport) };
+  const margins = normalizeMarginRows(rule);
+  const margin = margins.find(m => m.maxDiff !== null && diff <= m.maxDiff) || margins[margins.length - 1];
+  const winner = safeScore(margin?.winner ?? 6), loser = safeScore(margin?.loser ?? 0);
+  return a > b ? { a:winner, b:loser, margin:margin?.code || "MA", diff, sportKey: key } : { a:loser, b:winner, margin:margin?.code || "MA", diff, sportKey: key };
 }
 function ensureRow(row, teams, id){ if(id && !row[id]) row[id] = {id, name:teamName(teams,id), pts:0, played:0, wins:0, draws:0, losses:0, gf:0, ga:0}; }
 function applyResult(row, match, teams, includeLive, rules){
