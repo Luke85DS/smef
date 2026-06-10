@@ -149,3 +149,4 @@ body.display-screen{background:#020617;color:var(--text);overflow:hidden}.displa
 .qualified-team-box{min-height:50px!important;font-size:14px!important;line-height:1.04!important}
 @media(max-width:900px){.playoff-qualified-grid{grid-template-rows:repeat(4,minmax(50px,auto))!important;grid-template-columns:repeat(4,minmax(190px,1fr))!important;grid-auto-flow:column!important}}
 @media(max-width:560px){.playoff-qualified-grid{grid-template-rows:repeat(4,minmax(50px,auto))!important;grid-template-columns:repeat(4,minmax(190px,1fr))!important}.playoff-qualified-item{grid-template-columns:42px minmax(0,1fr)!important}}
+.tournament-badge{display:inline-block;margin-top:6px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:rgba(148,163,184,.12);font-size:12px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}

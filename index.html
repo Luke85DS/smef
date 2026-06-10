@@ -1,16 +1,16 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SM&F 2026</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
 <script type="module">
-import {renderTop} from './assets/js/app.js';
+import {renderTop, pageUrl} from './assets/js/app.js';
 renderTop('','');
 document.querySelector('.top').remove();
 document.querySelector('#app').innerHTML = `
 <section class="home-hero">
   <img class="home-logo" src="assets/img/logo.svg" alt="Logo torneo SM&F 2026">
   <div class="home-links home-links-compact">
-    <a class="home-link" href="calendario.html"><span>Calendario</span><small>Completo o filtrato per squadra</small></a>
-    <a class="home-link" href="turni.html"><span>Turni e risultati</span><small>Concluso, in corso, prossimo</small></a>
-    <a class="home-link" href="classifica.html"><span>Classifica</span><small>Punteggio aggiornato live</small></a>
-    <a class="home-link" href="playoff.html"><span>Playoff</span><small>Bracket del torneo</small></a>
+    <a class="home-link" href="${pageUrl('calendario.html')}"><span>Calendario</span><small>Completo o filtrato per squadra</small></a>
+    <a class="home-link" href="${pageUrl('turni.html')}"><span>Turni e risultati</span><small>Concluso, in corso, prossimo</small></a>
+    <a class="home-link" href="${pageUrl('classifica.html')}"><span>Classifica</span><small>Punteggio aggiornato live</small></a>
+    <a class="home-link" href="${pageUrl('playoff.html')}"><span>Playoff</span><small>Bracket del torneo</small></a>
   </div>
 </section>`;
 </script></body></html>

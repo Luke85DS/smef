@@ -1,3 +1,42 @@
+# Versione multi-torneo
+
+Questa versione introduce il contenitore multi-torneo. I dati non sono piu salvati direttamente in radice Firebase, ma sotto:
+
+```text
+tournaments/{tournamentId}/...
+```
+
+Pagina nuova:
+
+```text
+admin-home.html
+```
+
+Da qui puoi:
+- creare un nuovo torneo
+- entrare in un torneo esistente
+- aprire regia/setup/pubblico del torneo selezionato
+- migrare eventuali vecchi dati root nel torneo `default`
+
+Gli URL delle pagine supportano il parametro:
+
+```text
+?tid=ID_TORNEO
+```
+
+Esempi:
+
+```text
+admin.html?tid=smef-2026
+campo.html?tid=smef-2026&field=calcio1
+display.html?tid=smef-2026
+classifica.html?tid=smef-2026
+```
+
+Se il parametro `tid` non e presente, l'app usa l'ultimo torneo selezionato in `localStorage`, oppure `default`.
+
+---
+
 # Torneo Live App
 
 Mini web app statica per torneo multisport: classifica live/ufficiale, risultati, turni, pagina campo, display regia e admin.

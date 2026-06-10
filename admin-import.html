@@ -1,10 +1,10 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin Import</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
 <script type="module">
-import {renderTop, requireAdmin, read, write, patch, asArray, teamName} from './assets/js/app.js';
+import {renderTop, requireAdmin, read, write, patch, asArray, teamName, pageUrl} from './assets/js/app.js';
 renderTop('Admin import','Importa squadre e calendario da CSV o JSON');
 if(!requireAdmin()) throw new Error('Area admin bloccata');
-document.querySelector('.brand').insertAdjacentHTML('beforeend', '<div class="row admin-tools"><a class="btn warn" href="admin.html">Regia</a><a class="btn primary" href="admin-setup.html">Setup</a><a class="btn" href="admin-import.html">Import</a><button id="adminLogout" class="btn bad" type="button">Esci</button></div>');
-document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href='index.html'; });
+document.querySelector('.brand').insertAdjacentHTML('beforeend', `<div class="row admin-tools"><a class="btn warn" href="${pageUrl('admin.html')}">Regia</a><a class="btn primary" href="${pageUrl('admin-setup.html')}">Setup</a><a class="btn" href="${pageUrl('admin-import.html')}">Import</a><a class="btn primary" href="${pageUrl('admin-playoff.html')}">Playoff</a><button id="adminLogout" class="btn bad" type="button">Esci</button></div>`);
+document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href=pageUrl('index.html'); });
 let parsed = {teams:null, matches:null, fields:null, errors:[], warnings:[]};
 let existing = {};
 const appEl = document.querySelector('#app');

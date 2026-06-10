@@ -1,6 +1,6 @@
 <!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Playoff</title><link rel="stylesheet" href="assets/css/style.css"></head><body>
 <script type="module">
-import {renderTop, listen, patch, write, asArray, teamName, rankingRowsFromState, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore, effectiveGameDuration, effectiveBreakDuration} from './assets/js/app.js';
+import {renderTop, listen, patch, write, asArray, teamName, rankingRowsFromState, sportKey, canChooseSport, requireAdmin, fieldNumber, sportIcon, matchScore, effectiveGameDuration, effectiveBreakDuration, pageUrl} from './assets/js/app.js';
 renderTop('Admin playoff','Gestione tabellone, sport, campi e avanzamento playoff.');
 if(!requireAdmin()) throw new Error('Area admin bloccata');
 let state = {};

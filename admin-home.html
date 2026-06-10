@@ -1,0 +1,64 @@
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin tornei</title><link rel="stylesheet" href="assets/css/style.css"><style>.tournament-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.tournament-card{display:flex;flex-direction:column;gap:10px}.tournament-card h3{margin:0}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}</style></head><body>
+<script type="module">
+import {renderTop, requireAdmin, listenGlobal, writeGlobal, patchGlobal, readGlobal, newTournamentId, tournamentIndexRecord, pageUrl} from './assets/js/app.js';
+renderTop('Admin tornei','Crea un nuovo torneo o entra in un torneo esistente.');
+if(!requireAdmin()) throw new Error('Area admin bloccata');
+document.querySelector('.nav')?.remove();
+document.querySelector('.brand').insertAdjacentHTML('beforeend', '<div class="row admin-tools"><button id="adminLogout" class="btn bad" type="button">Esci</button></div>');
+document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href='index.html'; });
+const appEl = document.querySelector('#app');
+function esc(v){return String(v??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));}
+async function createTournament(){
+  const name = document.querySelector('#newName').value.trim();
+  if(!name){ document.querySelector('#msg').textContent='Inserisci un nome torneo.'; return; }
+  const id = newTournamentId(name);
+  const now = Date.now();
+  const base = {
+    meta:{id,name,createdAt:now,updatedAt:now,status:'setup'},
+    tournament:{name,currentSlot:1,teamCount:0,gameDuration:900,breakDuration:180,startTime:'14:00',phase:'waiting',mode:'groups',timerRunning:false,timerStart:null,timerDuration:900},
+    teams:{}, matches:{}, fields:{}, playoffs:{}, scoringRules:null, logs:{}, backups:{}
+  };
+  await writeGlobal(`tournaments/${id}`, base);
+  await writeGlobal(`tournamentIndex/${id}`, tournamentIndexRecord(id,{name,createdAt:now}));
+  localStorage.setItem('smef_active_tournament', id);
+  location.href = `admin-setup.html?tid=${encodeURIComponent(id)}`;
+}
+function enter(id, page='admin.html'){
+  localStorage.setItem('smef_active_tournament', id);
+  location.href = `${page}?tid=${encodeURIComponent(id)}`;
+}
+async function archive(id, archived){
+  if(archived){ if(!confirm('Archiviare questo torneo? Non verrà eliminato.')) return; }
+  await patchGlobal(`tournamentIndex/${id}`, {archived, updatedAt:Date.now()});
+  await patchGlobal(`tournaments/${id}/meta`, {archived, updatedAt:Date.now()});
+}
+async function migrateRoot(){
+  if(!confirm('Copiare eventuali dati storici dalla vecchia radice Firebase nel torneo "default"? Usa questa funzione solo una volta se serve recuperare il torneo pre-multitorneo.')) return;
+  const root = await readGlobal('/');
+  const keys = ['teams','matches','fields','tournament','playoffs','scoringRules'];
+  const payload = {meta:{id:'default',name:'SM&F default',createdAt:Date.now(),updatedAt:Date.now(),status:'migrated'}};
+  for(const k of keys) if(root && root[k] !== undefined) payload[k] = root[k];
+  if(!payload.tournament) payload.tournament = {currentSlot:1,phase:'waiting',mode:'groups',timerRunning:false};
+  await patchGlobal('tournaments/default', payload);
+  await writeGlobal('tournamentIndex/default', tournamentIndexRecord('default',{name:'SM&F default',createdAt:Date.now()}));
+  localStorage.setItem('smef_active_tournament','default');
+  alert('Migrazione completata nel torneo default.');
+}
+function draw(index){
+  const rows = Object.values(index || {}).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  appEl.innerHTML = `
+  <div class="grid">
+    <section class="card"><h2>Crea nuovo torneo</h2><div class="formline"><label>Nome torneo</label><input id="newName" placeholder="es. SM&F 2027"><button id="createBtn" class="btn primary">Crea torneo</button></div><p id="msg" class="muted"></p></section>
+    <section class="card"><h2>Utility</h2><p class="muted">Da usare solo se devi recuperare dati creati prima della versione multi-torneo.</p><button id="migrateRoot" class="btn warn">Migra vecchia radice in default</button></section>
+  </div><br>
+  <section class="card"><h2>Tornei esistenti</h2>${rows.length?`<div class="tournament-list">${rows.map(t=>`<article class="card tournament-card ${t.archived?'muted':''}"><h3>${esc(t.name||t.id)}</h3><small class="mono">${esc(t.id)}</small><p class="muted">Creato: ${t.createdAt?new Date(t.createdAt).toLocaleString('it-IT'):'-'}</p><div class="row"><button class="btn primary" data-enter="${esc(t.id)}">Regia</button><button class="btn" data-setup="${esc(t.id)}">Setup</button><button class="btn" data-public="${esc(t.id)}">Pubblico</button><button class="btn warn" data-archive="${esc(t.id)}">${t.archived?'Riattiva':'Archivia'}</button></div></article>`).join('')}</div>`:'<p class="muted">Nessun torneo creato.</p>'}</section>`;
+  document.querySelector('#createBtn').onclick=createTournament;
+  document.querySelector('#newName').addEventListener('keydown',e=>{if(e.key==='Enter')createTournament();});
+  document.querySelector('#migrateRoot').onclick=migrateRoot;
+  document.querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>enter(b.dataset.enter,'admin.html'));
+  document.querySelectorAll('[data-setup]').forEach(b=>b.onclick=()=>enter(b.dataset.setup,'admin-setup.html'));
+  document.querySelectorAll('[data-public]').forEach(b=>b.onclick=()=>enter(b.dataset.public,'index.html'));
+  document.querySelectorAll('[data-archive]').forEach(b=>b.onclick=()=>archive(b.dataset.archive, !(index?.[b.dataset.archive]?.archived)));
+}
+listenGlobal('tournamentIndex', v=>draw(v||{}));
+</script></body></html>

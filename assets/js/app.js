@@ -7,12 +7,42 @@ export const db = getDatabase(app);
 export const $ = (sel) => document.querySelector(sel);
 export const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 export const qs = new URLSearchParams(location.search);
-export const fieldId = qs.get("id") || qs.get("campo") || "calcio1";
 
-export function listen(path, cb){ return onValue(ref(db, path), snap => cb(snap.val())); }
-export function write(path, value){ return set(ref(db, path), value); }
-export function patch(path, value){ return update(ref(db, path), value); }
-export async function read(path){ return (await get(child(ref(db), path))).val(); }
+export const RAW_ROOT_KEYS = new Set(["tournaments", "tournamentIndex", "rootArchive"]);
+function slugifyId(value){
+  const base = String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return base || `torneo-${Date.now()}`;
+}
+export function selectedTournamentId(){
+  const fromUrl = qs.get("tid") || qs.get("tournament") || qs.get("torneo");
+  if(fromUrl){ localStorage.setItem("smef_active_tournament", fromUrl); return fromUrl; }
+  return localStorage.getItem("smef_active_tournament") || "default";
+}
+export const tournamentId = selectedTournamentId();
+export const fieldId = qs.get("field") || qs.get("campo") || qs.get("id") || "calcio1";
+export function withTournament(path){
+  const clean = String(path ?? "").replace(/^\/+/, "").replace(/\/+$/, "");
+  if(!clean) return `tournaments/${tournamentId}`;
+  if(clean === "/") return `tournaments/${tournamentId}`;
+  if(clean.startsWith(`tournaments/`) || RAW_ROOT_KEYS.has(clean.split("/")[0])) return clean;
+  return `tournaments/${tournamentId}/${clean}`;
+}
+export function pageUrl(page, params={}){
+  const url = new URL(page, location.href);
+  url.searchParams.set("tid", tournamentId);
+  Object.entries(params || {}).forEach(([k,v]) => { if(v !== undefined && v !== null && v !== "") url.searchParams.set(k, v); });
+  return `${url.pathname.split('/').pop()}${url.search}`;
+}
+export function listen(path, cb){ return onValue(ref(db, withTournament(path)), snap => cb(snap.val())); }
+export function write(path, value){ return set(ref(db, withTournament(path)), value); }
+export function patch(path, value){ return update(ref(db, withTournament(path)), value); }
+export async function read(path){ return (await get(child(ref(db), withTournament(path)))).val(); }
+export function listenGlobal(path, cb){ return onValue(ref(db, String(path || "").replace(/^\/+/, "")), snap => cb(snap.val())); }
+export function writeGlobal(path, value){ return set(ref(db, String(path || "").replace(/^\/+/, "")), value); }
+export function patchGlobal(path, value){ return update(ref(db, String(path || "").replace(/^\/+/, "")), value); }
+export async function readGlobal(path){ return (await get(child(ref(db), String(path || "").replace(/^\/+/, "")))).val(); }
+export function newTournamentId(name){ return `${slugifyId(name)}-${new Date().toISOString().slice(0,10).replace(/-/g,"")}`; }
+export function tournamentIndexRecord(id, data={}){ return { id, name:data.name || id, createdAt:data.createdAt || Date.now(), updatedAt:Date.now(), archived:!!data.archived }; }
 
 export function asArray(obj){ return Object.entries(obj || {}).map(([id,v]) => ({id, ...v})); }
 export function teamName(teams, id){ return teams?.[id]?.name || id || "-"; }
@@ -235,7 +265,7 @@ export function playoffRoundLabel(round){ return {r16:"Ottavi", qf:"Quarti", sf:
 
 export const ADMIN_PASSWORD = "smef2026";
 export function isAdminUnlocked(){ return sessionStorage.getItem("smef_admin_unlocked") === "1"; }
-export function lockAdmin(){ sessionStorage.removeItem("smef_admin_unlocked"); location.href = "index.html"; }
+export function lockAdmin(){ sessionStorage.removeItem("smef_admin_unlocked"); location.href = pageUrl("index.html"); }
 export function requireAdmin(){
   if(isAdminUnlocked()) return true;
   const main = document.querySelector('#app') || document.body;
@@ -254,8 +284,9 @@ export function requireAdmin(){
 }
 
 export function nav(){
-  return `<div class="nav"><a href="index.html">Home</a><a href="calendario.html">Calendario</a><a href="turni.html">Turni e risultati</a><a href="classifica.html">Classifica</a><a href="playoff.html">Playoff</a></div>`;
+  return `<div class="nav"><a href="${pageUrl('index.html')}">Home</a><a href="${pageUrl('calendario.html')}">Calendario</a><a href="${pageUrl('turni.html')}">Turni e risultati</a><a href="${pageUrl('classifica.html')}">Classifica</a><a href="${pageUrl('playoff.html')}">Playoff</a></div>`;
 }
 export function renderTop(title, subtitle=""){
-  document.body.insertAdjacentHTML("afterbegin", `<div class="wrap"><div class="top"><div class="brand"><h1>${title}</h1><p>${subtitle}</p></div>${nav()}</div><main id="app"></main></div>`);
+  const tLabel = tournamentId && tournamentId !== "default" ? `<span class="tournament-badge">${tournamentId}</span>` : "";
+  document.body.insertAdjacentHTML("afterbegin", `<div class="wrap"><div class="top"><div class="brand"><h1>${title}</h1><p>${subtitle}</p>${tLabel}</div>${nav()}</div><main id="app"></main></div>`);
 }

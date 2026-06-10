@@ -39,7 +39,7 @@
 </head>
 <body class="display-screen">
 <script type="module">
-import {requireAdmin, listen, fmtTime, timerRemaining, asArray, teamName, tournamentPhase, phaseLabel, slotStartLabel, computeStandings, sportIcon, fieldNumber, matchScore, isPlayoffMode, playoffRoundLabel} from './assets/js/app.js';
+import {requireAdmin, listen, fmtTime, timerRemaining, asArray, teamName, tournamentPhase, phaseLabel, slotStartLabel, computeStandings, sportIcon, fieldNumber, matchScore, isPlayoffMode, playoffRoundLabel, pageUrl} from './assets/js/app.js';
 if(!requireAdmin()) throw new Error('Area admin bloccata');
 document.body.innerHTML = '<main id="app" class="projector"></main>';
 function fitDisplay(){ const s = Math.min(window.innerWidth/1920, window.innerHeight/1080); document.documentElement.style.setProperty('--display-scale', String(s)); }
