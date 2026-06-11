@@ -2,7 +2,7 @@
 <script type="module">
 import {renderTop, requireAdmin, listenGlobal, writeGlobal, patchGlobal, readGlobal, newTournamentId, tournamentIndexRecord, pageUrl} from './assets/js/app.js';
 renderTop('Admin tornei','Crea un nuovo torneo o entra in un torneo esistente.');
-if(!requireAdmin()) throw new Error('Area admin bloccata');
+if(!requireAdmin()) throw new Error('Area admin bloccata: credenziali mancanti o errate.');
 document.querySelector('.nav')?.remove();
 document.querySelector('.brand').insertAdjacentHTML('beforeend', '<div class="row admin-tools"><button id="adminLogout" class="btn bad" type="button">Esci</button></div>');
 document.querySelector('#adminLogout')?.addEventListener('click', () => { sessionStorage.removeItem('smef_admin_unlocked'); location.href='index.html'; });
