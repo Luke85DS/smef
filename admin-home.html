@@ -51,32 +51,54 @@ async function migrateLegacyRootToDefault(){
 }
 function hasLegacyRoot(root){
   if(!root) return false;
-  const hasTeams = root.teams && Object.keys(root.teams).length;
-  const hasMatches = root.matches && Object.keys(root.matches).length;
-  return !!(hasTeams || hasMatches);
+  const legacyKeys = ['teams','matches','fields','tournament','playoffs','scoringRules'];
+  return legacyKeys.some(k => root[k] && (typeof root[k] !== 'object' || Object.keys(root[k]).length));
+}
+function countObj(v){ return v && typeof v === 'object' ? Object.keys(v).length : 0; }
+function legacySummary(root){
+  return {
+    teams: countObj(root?.teams),
+    matches: countObj(root?.matches),
+    fields: countObj(root?.fields),
+    hasTournament: !!root?.tournament,
+    hasPlayoffs: !!root?.playoffs
+  };
 }
 async function mergedTournamentRows(index){
   const tournaments = await readGlobal('tournaments') || {};
   const merged = {...(index || {})};
   Object.entries(tournaments).forEach(([id, t]) => {
-    if(!merged[id]) merged[id] = tournamentIndexRecord(id, {name:t?.meta?.name || t?.tournament?.name || id, createdAt:t?.meta?.createdAt || Date.now(), archived:t?.meta?.archived});
+    const name = t?.meta?.name || t?.tournament?.name || (id === 'default' ? 'SM&F appena concluso' : id);
+    if(!merged[id]) merged[id] = tournamentIndexRecord(id, {name, createdAt:t?.meta?.createdAt || t?.tournament?.createdAt || Date.now(), archived:t?.meta?.archived});
+    else merged[id] = {...merged[id], name: merged[id].name || name, archived: !!(merged[id].archived || t?.meta?.archived)};
   });
   return Object.values(merged).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+}
+async function linkDefaultIfExists(){
+  const t = await readGlobal('tournaments/default');
+  if(!t){ alert('Non trovo tournaments/default. Usa prima “Migra vecchia radice”.'); return; }
+  await writeGlobal('tournamentIndex/default', tournamentIndexRecord('default', {name:t?.meta?.name || t?.tournament?.name || 'SM&F appena concluso', createdAt:t?.meta?.createdAt || t?.tournament?.createdAt || Date.now(), archived:false}));
+  localStorage.setItem('smef_active_tournament','default');
+  alert('Torneo default aggiunto all’elenco.');
 }
 async function draw(index){
   const rows = await mergedTournamentRows(index || {});
   const root = await readGlobal('/');
-  const showLegacy = hasLegacyRoot(root) && !(index||{}).default && !(await readGlobal('tournaments/default'));
+  const tournamentsDefault = await readGlobal('tournaments/default');
+  const legacy = hasLegacyRoot(root);
+  const summary = legacySummary(root || {});
+  const defaultIndexed = !!((index||{}).default);
   appEl.innerHTML = `
   <div class="grid">
     <section class="card"><h2>Crea nuovo torneo</h2><div class="formline"><label>Nome torneo</label><input id="newName" placeholder="es. SM&F 2027"><button id="createBtn" class="btn primary">Crea torneo</button></div><p id="msg" class="muted"></p></section>
-    <section class="card"><h2>Utility</h2><p class="muted">Da usare solo se devi recuperare dati creati prima della versione multi-torneo.</p><button id="migrateRoot" class="btn warn">Migra vecchia radice in default</button></section>
+    <section class="card"><h2>Recupero torneo appena concluso</h2><p class="muted">Se il torneo fatto ieri era stato creato prima del multi-torneo, i dati sono nella vecchia radice Firebase. Questa sezione li copia/aggancia dentro l’elenco tornei.</p><div class="row"><button id="importLegacy" class="btn primary">Migra vecchia radice in “SM&F appena concluso”</button><button id="linkDefault" class="btn warn">Mostra tournaments/default nell’elenco</button></div><p class="muted mono">Root legacy: squadre ${summary.teams}, partite ${summary.matches}, campi ${summary.fields}, torneo ${summary.hasTournament?'sì':'no'}, playoff ${summary.hasPlayoffs?'sì':'no'}${tournamentsDefault?'; tournaments/default presente':''}${defaultIndexed?'; default già indicizzato':''}</p></section>
   </div><br>
-  ${showLegacy?`<section class="card warn"><h2>Torneo appena concluso rilevato</h2><p>Ho trovato dati del vecchio torneo nella radice Firebase. Per vederlo nei tornei esistenti, importalo come <strong>SM&F appena concluso</strong>.</p><button id="importLegacy" class="btn primary">Aggiungi ai tornei esistenti</button></section><br>`:''}<section class="card"><h2>Tornei esistenti</h2>${rows.length?`<div class="tournament-list">${rows.map(t=>`<article class="card tournament-card ${t.archived?'muted':''}"><h3>${esc(t.name||t.id)}</h3><small class="mono">${esc(t.id)}</small><p class="muted">Creato: ${t.createdAt?new Date(t.createdAt).toLocaleString('it-IT'):'-'}</p><div class="row"><button class="btn primary" data-enter="${esc(t.id)}">Regia</button><button class="btn" data-setup="${esc(t.id)}">Setup</button><button class="btn" data-public="${esc(t.id)}">Pubblico</button><button class="btn warn" data-archive="${esc(t.id)}">${t.archived?'Riattiva':'Archivia'}</button></div></article>`).join('')}</div>`:'<p class="muted">Nessun torneo creato.</p>'}</section>`;
+  ${legacy && !tournamentsDefault?`<section class="card warn"><h2>Torneo appena concluso rilevato</h2><p>Ho trovato dati del vecchio torneo nella radice Firebase. Clicca il pulsante di migrazione per renderlo visibile nei tornei esistenti.</p></section><br>`:''}<section class="card"><h2>Tornei esistenti</h2>${rows.length?`<div class="tournament-list">${rows.map(t=>`<article class="card tournament-card ${t.archived?'muted':''}"><h3>${esc(t.name||t.id)}</h3><small class="mono">${esc(t.id)}</small><p class="muted">Creato: ${t.createdAt?new Date(t.createdAt).toLocaleString('it-IT'):'-'}</p><div class="row"><button class="btn primary" data-enter="${esc(t.id)}">Regia</button><button class="btn" data-setup="${esc(t.id)}">Setup</button><button class="btn" data-public="${esc(t.id)}">Pubblico</button><button class="btn warn" data-archive="${esc(t.id)}">${t.archived?'Riattiva':'Archivia'}</button></div></article>`).join('')}</div>`:'<p class="muted">Nessun torneo creato.</p>'}</section>`;
   document.querySelector('#createBtn').onclick=createTournament;
   document.querySelector('#newName').addEventListener('keydown',e=>{if(e.key==='Enter')createTournament();});
-  document.querySelector('#migrateRoot').onclick=migrateRoot;
+  document.querySelector('#migrateRoot')?.addEventListener('click', migrateRoot);
   document.querySelector('#importLegacy')?.addEventListener('click', async () => { await migrateLegacyRootToDefault(); localStorage.setItem('smef_active_tournament','default'); location.href='admin.html?tid=default'; });
+  document.querySelector('#linkDefault')?.addEventListener('click', linkDefaultIfExists);
   document.querySelectorAll('[data-enter]').forEach(b=>b.onclick=()=>enter(b.dataset.enter,'admin.html'));
   document.querySelectorAll('[data-setup]').forEach(b=>b.onclick=()=>enter(b.dataset.setup,'admin-setup.html'));
   document.querySelectorAll('[data-public]').forEach(b=>b.onclick=()=>enter(b.dataset.public,'index.html'));
