@@ -37,10 +37,11 @@ export function listen(path, cb){ return onValue(ref(db, withTournament(path)), 
 export function write(path, value){ return set(ref(db, withTournament(path)), value); }
 export function patch(path, value){ return update(ref(db, withTournament(path)), value); }
 export async function read(path){ return (await get(child(ref(db), withTournament(path)))).val(); }
-export function listenGlobal(path, cb){ return onValue(ref(db, String(path || "").replace(/^\/+/, "")), snap => cb(snap.val())); }
-export function writeGlobal(path, value){ return set(ref(db, String(path || "").replace(/^\/+/, "")), value); }
-export function patchGlobal(path, value){ return update(ref(db, String(path || "").replace(/^\/+/, "")), value); }
-export async function readGlobal(path){ return (await get(child(ref(db), String(path || "").replace(/^\/+/, "")))).val(); }
+function cleanGlobalPath(path){ return String(path ?? "").replace(/^\/+/, "").replace(/\/+$/, ""); }
+export function listenGlobal(path, cb){ const clean = cleanGlobalPath(path); return onValue(clean ? ref(db, clean) : ref(db), snap => cb(snap.val())); }
+export function writeGlobal(path, value){ const clean = cleanGlobalPath(path); return set(clean ? ref(db, clean) : ref(db), value); }
+export function patchGlobal(path, value){ const clean = cleanGlobalPath(path); return update(clean ? ref(db, clean) : ref(db), value); }
+export async function readGlobal(path){ const clean = cleanGlobalPath(path); return (await get(clean ? child(ref(db), clean) : ref(db))).val(); }
 export function newTournamentId(name){ return `${slugifyId(name)}-${new Date().toISOString().slice(0,10).replace(/-/g,"")}`; }
 export function tournamentIndexRecord(id, data={}){ return { id, name:data.name || id, createdAt:data.createdAt || Date.now(), updatedAt:Date.now(), archived:!!data.archived }; }
 
